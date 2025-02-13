@@ -77,19 +77,11 @@ An advanced Quran browser application built with Python and PyQt5. This project 
 
 2. **Install required packages:**
 
-   If you use `pip`:
-
-   ```bash
-   pip install PyQt5
-   ```
-
-   Alternatively, if you are using a requirements file, run:
+   If you use `pip` run:
 
    ```bash
    pip install -r requirements.txt
    ```
-
-_Note: Additional libraries (if any) should be added to the requirements file._
 
 ---
 
