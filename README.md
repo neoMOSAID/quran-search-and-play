@@ -11,7 +11,7 @@
 [![Website](https://img.shields.io/badge/Website-mosaid.xyz-blue)]( https://mosaid.xyz/quran-search)
 
 
-**Website:** [https://mosaid.xyz/quran-player](https://mosaid.xyz/quran-search)  
+**Website:** [https://mosaid.xyz/quran-search](https://mosaid.xyz/quran-search)  
 **GitHub:** [https://github.com/neoMOSAID/quran-search-and-play](https://github.com/neoMOSAID/quran-search-and-play)
 
 
