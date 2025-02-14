@@ -124,27 +124,59 @@ def get_audio_directory():
 # STEP 1: Create a custom QAbstractListModel to replace the QListWidget.
 # =============================================================================
 class QuranListModel(QtCore.QAbstractListModel):
+    loading_complete = QtCore.pyqtSignal()
     def __init__(self, results=None, parent=None):
         super().__init__(parent)
         self.results = results or []
-    
-    def rowCount(self, parent=QtCore.QModelIndex()):
-        return len(self.results)
-    
+        self._displayed_results = 0
+
     def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid():
+        if not index.isValid() or index.row() >= len(self.results):
             return None
+            
         result = self.results[index.row()]
+        
         if role == Qt.DisplayRole:
             return result.get('text_uthmani', '')
         elif role == Qt.UserRole:
             return result
         return None
+    
+    def rowCount(self, parent=QtCore.QModelIndex()):
+        return self._displayed_results
+
+    def appendResults(self, new_results):
+        start = self._displayed_results
+        end = start + len(new_results)
+        self.beginInsertRows(QtCore.QModelIndex(), start, end-1)
+        self.results.extend(new_results)
+        self._displayed_results = len(self.results)  # Show all immediately for now
+        self.endInsertRows()
 
     def updateResults(self, results):
         self.beginResetModel()
         self.results = results
+        self._displayed_results = min(50, len(results))  # Initial batch
         self.endResetModel()
+        # Schedule remaining results
+        if len(results) > 50:
+            QtCore.QTimer.singleShot(100, lambda: self.load_remaining_results())
+
+    def load_remaining_results(self):
+        remaining = len(self.results) - self._displayed_results
+        if remaining > 0:
+            batch_size = min(50, remaining)
+            self.beginInsertRows(QtCore.QModelIndex(), 
+                               self._displayed_results, 
+                               self._displayed_results + batch_size - 1)
+            self._displayed_results += batch_size
+            self.endInsertRows()
+            
+            if self._displayed_results < len(self.results):
+                QtCore.QTimer.singleShot(50, self.load_remaining_results)
+            else:
+                self.loading_complete.emit()  # Emit signal when done
+
 
 # =============================================================================
 # STEP 2: Create a worker thread for asynchronous search operations.
@@ -189,17 +221,22 @@ class SearchWorker(QtCore.QThread):
 class SearchLineEdit(QtWidgets.QLineEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.history = []
-        self.history_max = 20
+        self.history_max = 50  # Increased from 20 to 50
         self.init_history()
 
     def init_history(self):
+        # Create history menu
         self.history_menu = QtWidgets.QMenu(self)
         self.history_list = QtWidgets.QListWidget()
         self.history_menu.setLayout(QtWidgets.QVBoxLayout())
         self.history_menu.layout().addWidget(self.history_list)
-        
         self.history_list.itemClicked.connect(self.select_history_item)
+
+        # Load persisted history
+        settings = QtCore.QSettings("MOSAID", "QuranSearch")
+        self.history = settings.value("searchHistory", [], type=list)
+        self.history = self.history[:self.history_max]  # Enforce max limit
+        self.update_history_list()
 
     def select_history_item(self, item):
         self.setText(item.text())
@@ -207,12 +244,48 @@ class SearchLineEdit(QtWidgets.QLineEdit):
 
     def update_history(self, query):
         if query and query not in self.history:
+            # Add to beginning and enforce max limit
             self.history.insert(0, query)
             self.history = self.history[:self.history_max]
             
-            self.history_list.clear()
-            for item in self.history:
-                self.history_list.addItem(item)
+            # Persist to QSettings
+            settings = QtCore.QSettings("MOSAID", "QuranSearch")
+            settings.setValue("searchHistory", self.history)
+            
+            self.update_history_list()
+
+    def update_history_list(self):
+        self.history_list.clear()
+        for item in self.history:
+            self.history_list.addItem(item)
+
+    #still unused
+    def clear_history(self):
+        settings = QtCore.QSettings("MOSAID", "QuranSearch")
+        settings.remove("searchHistory")
+        self.history = []
+        self.update_history_list()
+
+    def keyPressEvent(self, event):
+        if event.key() in (QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
+            self.handle_history_navigation(event.key())
+        else:
+            super().keyPressEvent(event)
+
+    def handle_history_navigation(self, key):
+        if not hasattr(self, '_history_index'):
+            self._history_index = -1
+
+        if key == QtCore.Qt.Key_Up:
+            self._history_index = min(self._history_index + 1, len(self.history)-1)
+        elif key == QtCore.Qt.Key_Down:
+            self._history_index = max(self._history_index - 1, -1)
+
+        if self._history_index >= 0:
+            self.setText(self.history[self._history_index])
+        else:
+            self.clear()
+
 
 class QuranDelegate(QtWidgets.QStyledItemDelegate):
     """Custom delegate for rendering Quran verses with proper RTL support."""
@@ -249,6 +322,9 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         painter.restore()
 
     def _format_text(self, result, version):
+        if not result:  # Add null check
+            return ""
+        
         text = result.get(f"text_{version}", "")
         return f"""
             <div dir="rtl" style="text-align:left;">
@@ -263,6 +339,8 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         result = index.data(Qt.UserRole)
+        if not result:  # Handle null results
+            return QSize(0, 0)
         doc = QtGui.QTextDocument()
         doc.setHtml(self._format_text(result, self.version))
         doc.setTextWidth(option.rect.width() - 20)
@@ -292,7 +370,7 @@ class DetailView(QtWidgets.QWidget):
         # Add widgets to splitter
         splitter.addWidget(context_widget)
         splitter.addWidget(self.notes_widget)
-        splitter.setSizes([400, 200])  # Initial sizes
+        splitter.setSizes([250, 350])  # Initial sizes
         
         # Main layout
         layout = QtWidgets.QVBoxLayout(self)
@@ -306,7 +384,7 @@ class DetailView(QtWidgets.QWidget):
         html = []
         
         # Set colors based on theme
-        text_color = "#FFFFFF" if is_dark_theme else "#000000"
+        text_color = "#000000" if is_dark_theme else "#000000"
         link_color = "#90CAF9" if is_dark_theme else "#1565C0"
         bg_color = self.palette().window().color().name()
         
@@ -351,6 +429,7 @@ class DetailView(QtWidgets.QWidget):
 class NotesWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.statusBar = lambda: self.window().statusBar()  
         self.notes_manager = NotesManager()
         self.current_surah = None
         self.current_ayah = None
@@ -370,19 +449,45 @@ class NotesWidget(QtWidgets.QWidget):
         toolbar.addAction(self.delete_button)
         
         # Split view for notes list and editor
-        splitter = QtWidgets.QSplitter(Qt.Vertical)
+        splitter = QtWidgets.QSplitter(Qt.Horizontal)
         
         # Notes list
         self.notes_list = QtWidgets.QListWidget()
         self.notes_list.itemSelectionChanged.connect(self.on_note_selected)
+
+        # Set font size and styling
+        list_font = self.notes_list.font()
+        list_font.setPointSize(12)  # Increased from default 9-10
+        self.notes_list.setFont(list_font)
+        
+        # Optional: Add padding and set minimum row height
+        self.notes_list.setStyleSheet("""
+            QListWidget::item {
+                padding: 6px;
+                border-bottom: 1px solid #ddd;
+            }
+        """)
+        self.notes_list.setMinimumHeight(100)
         
         # Editor
         self.editor = QtWidgets.QTextEdit()
-        self.editor.setPlaceholderText("Write your note here...")
+        self.editor.setPlaceholderText("...أكتب هنا")
+        editor_font = self.notes_list.font()
+        editor_font.setPointSize(12)  # Increased from default 9-10
+        self.editor.setFont(editor_font)
         
         splitter.addWidget(self.notes_list)
         splitter.addWidget(self.editor)
-        splitter.setSizes([200, 400])
+
+        # Set initial split ratio (1:3 ratio)
+        splitter.setSizes([self.height()//4, self.height()//4*3])
+        
+        # Make editor resizing prioritized
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 3)
+        
+        # Ensure proper initial layout
+        QtCore.QTimer.singleShot(100, lambda: splitter.setSizes([200, 300]))
         
         layout.addWidget(toolbar)
         layout.addWidget(splitter)
@@ -402,7 +507,12 @@ class NotesWidget(QtWidgets.QWidget):
         self.notes_list.clear()
         notes = self.notes_manager.get_notes(self.current_surah, self.current_ayah)
         for note in notes:
-            item = QtWidgets.QListWidgetItem(note['content'])
+            # Display first 80 characters as preview
+            preview = note['content'][:80]
+            if len(note['content']) > 80:
+                preview += "..."
+                
+            item = QtWidgets.QListWidgetItem(preview)
             item.setData(Qt.UserRole, note)
             self.notes_list.addItem(item)
         self.editor.clear()
@@ -437,9 +547,33 @@ class NotesWidget(QtWidgets.QWidget):
     
     def delete_note(self):
         if self.current_note_id:
-            self.notes_manager.delete_note(self.current_note_id)
-            self.load_notes()
-    
+            # Get note preview text
+            selected_item = self.notes_list.currentItem()
+            note_preview = selected_item.text() if selected_item else "this note"
+            
+            # Create confirmation dialog
+            msg = QtWidgets.QMessageBox(self)
+            msg.setIcon(QtWidgets.QMessageBox.Warning)
+            msg.setWindowTitle("Confirm Deletion")
+            msg.setText(f"هل تريد حقا إزالة هذا التسجيل")
+            msg.setInformativeText(note_preview)
+            msg.setStandardButtons(
+                QtWidgets.QMessageBox.Yes | 
+                QtWidgets.QMessageBox.No
+            )
+            msg.setDefaultButton(QtWidgets.QMessageBox.No)
+            
+            # Add keyboard shortcuts
+            msg.button(QtWidgets.QMessageBox.Yes).setShortcut(QtGui.QKeySequence("Y"))
+            msg.button(QtWidgets.QMessageBox.No).setShortcut(QtGui.QKeySequence("N"))
+            
+            # Show dialog and handle response
+            response = msg.exec_()
+            if response == QtWidgets.QMessageBox.Yes:
+                self.notes_manager.delete_note(self.current_note_id)
+                self.load_notes()
+                self.statusBar().showMessage("Note deleted successfully", 2000)
+        
     def delete_all_notes(self):
         if self.current_surah and self.current_ayah:
             self.notes_manager.delete_all_notes(self.current_surah, self.current_ayah)
@@ -787,9 +921,21 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         # Start the search in a background thread.
         self.search_worker = SearchWorker(self.search_engine, method, query)
-        self.search_worker.results_ready.connect(lambda results: self.update_results(results, query))
+        self.search_worker.results_ready.connect(self.handle_search_results)
         self.search_worker.error_occurred.connect(lambda error: self.showMessage(f"Search error: {error}", 3000))
         self.search_worker.start()
+
+    def handle_search_results(self, results):
+        self.model.updateResults(results)
+        self.result_count.setText(f"Found {len(results)} results")
+        if results:
+            self.results_view.setFocus()
+        # Connect to the properly defined signal
+        self.model.loading_complete.connect(self.finalize_results)
+
+    def finalize_results(self):
+        self.result_count.setText(f"Found {len(self.model.results)} results.")
+        self.model.loading_complete.disconnect()  # Clean up connection
 
     def update_results(self, results, query):
         self.model.updateResults(results)

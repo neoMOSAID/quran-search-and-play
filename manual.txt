@@ -1,0 +1,172 @@
+Quran Search Application User Manual
+
+The Quran Search application is a comprehensive tool for studying the Quran. Below is a detailed breakdown of its features:
+
+1. QURAN SEARCH FEATURES
+---------------------------------
+- Search Methods:
+  * Text Search:
+    - Search Arabic words/phrases across the entire Quran
+    - Example: Search "الرحمن" to find verses with this term
+    - Results show verses in context with highlighted matches
+
+  * Surah Search:
+    - Enter a Surah number (1-114) to view all its verses
+    - Automatically syncs with the Surah dropdown menu
+
+  * Surah + Ayah Range:
+    - Format: "Surah FirstAyah LastAyah"
+    - Example: "2 255 256" shows Surah 2 Ayahs 255-256
+    - "2 255" shows from Ayah 255 to Surah end
+
+- Gradual Loading:
+  - First 50 results appear instantly
+  - Remaining results load automatically in background batches
+  - "Loading..." status shown during background processing
+
+2. NOTES SYSTEM
+---------------------------------
+- Per-Verse Notes:
+  - Create unlimited notes per ayah
+  - Stored locally in encrypted SQLite database
+  - Accessible across sessions
+
+- Interface:
+  * Split View:
+    - Top 70%: Verse context
+    - Bottom 30%: Notes editor/list
+    - Adjustable divider (drag to resize)
+
+  * Notes List:
+    - Shows first 80 characters of each note
+    - Chronological order (newest first)
+    - 12pt font size for readability
+
+  * Editor:
+    - Full Arabic text support
+    - Basic formatting (plain text)
+    - Placeholder text when empty
+
+- Actions:
+  * New Note: Ctrl+N
+  * Delete Note: Confirmation dialog appears
+
+3. AUDIO PLAYBACK
+---------------------------------
+- Controls:
+  * Play: Space (current verse)
+  * Context Play: Ctrl+P (current + next 5 verses)
+  * Surah Play: Ctrl+A (entire Surah)
+  * Stop: Ctrl+S
+
+- Auto-Advance:
+  - Continues to next Surah after completion
+  - Loop back to Surah 1 after 114
+  - Ctrl+B jumps to current playback Surah
+
+4. AUDIO FILE SETUP
+---------------------------------
+- Directory Configuration:
+  * Set Location:
+    1. Go to Menu > Set Audio Directory
+    2. Choose folder containing audio files
+    3. Valid files must be named as: SSSAAA.mp3 
+       (SSS = 3-digit surah number, AAA = 3-digit ayah number)
+       Example: 002255.mp3 = Surah 2 Ayah 255
+
+- Requirements:
+  * Supported Format: MP3 files only
+  * Naming Convention: Zero-padded numbers
+  * Folder Structure: Flat directory (no subfolders)
+
+- Troubleshooting:
+  * "Audio not found" warning appears if:
+    - Files are missing/invalid format
+    - Incorrect naming convention
+    - Directory not properly set
+  
+  * Auto-Check: Application validates files on directory change
+  * Status: Current directory shown in status bar after setup
+
+- Getting Audio Files:
+  * Official Recommendation: Download from:
+    https://everyayah.com/recitations_ayat.html
+  * Ensure files follow naming convention before placing in directory
+
+5. INTERFACE CUSTOMIZATION
+---------------------------------
+- Themes:
+  * Toggle: Ctrl+D
+  * Dark Mode: Black background, white text
+  * Light Mode: White background, black text
+
+- Arabic Display:
+  * Script Toggle: Escape
+    - Uthmani: Traditional script
+    - Simplified: Modern clear script
+  * RTL Support: Proper Arabic alignment
+
+- Layout:
+  * Adjustable main view splitter
+  * Minimum list heights enforced
+  * Responsive window resizing
+
+6. SEARCH HISTORY
+---------------------------------
+- Features:
+  * Last 50 searches saved
+  * Persists between app restarts
+  * Accessed via Up/Down arrow keys
+
+- Navigation:
+  * ↑: Older searches
+  * ↓: Newer searches
+  * Enter: Run selected search
+
+7. KEYBOARD SHORTCUTS
+---------------------------------
+- Navigation:
+  Ctrl+F  - Focus search bar
+  Ctrl+H  - Show help
+  Ctrl+J  - Load Surah from selected ayah
+  Ctrl+K  - Jump to playback Surah
+  Esc     - Toggle script
+  Backspc - Return to results
+
+- Playback:
+  Space   - Play current
+  Ctrl+P  - Play context
+  Ctrl+A  - Play Surah
+  Ctrl+B  - Back to current Surah
+
+- Notes:
+  Ctrl+N  - New note
+  Ctrl+Del- Delete note
+
+8. TECHNICAL FEATURES
+---------------------------------
+- Background Processing:
+  * Search runs in separate thread
+  * UI remains responsive during long searches
+
+- Error Handling:
+  * Clear error messages in status bar
+  * Invalid search warnings
+  * File missing notifications
+
+- Compatibility:
+  * Windows/macOS/Linux support
+  * Screen reader accessible
+
+9. GETTING STARTED
+---------------------------------
+1. Start with Ctrl+F to search
+2. Double-click results for details
+3. Use Ctrl+D for comfortable theme
+4. Bookmark important verses with notes
+5. Adjust splitters for optimal layout
+
+For support: https://mosaid.xyz/quran-search
+Contact: mail@mosaid.xyz
+
+[End of Manual]
