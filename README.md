@@ -32,6 +32,8 @@ An advanced Quran browser application built with Python and PyQt5. This project 
 - [License](#license)
 - [Acknowledgements](#acknowledgements)
 - [Contact](#contact)
+- [Manual](#quran-search-application-user-manual)
+
 
 ---
 
@@ -196,7 +198,7 @@ Enjoy using Quran Search and feel free to contribute improvements or report issu
 
 ---
 
-# **Quran Search Application User Manual**  
+# Quran Search Application User Manual
 
 The Quran Search application is a feature-rich tool designed to enhance your Quranic study experience. Below is a comprehensive breakdown of its features and functionalities:  
 
