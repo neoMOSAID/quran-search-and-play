@@ -12,15 +12,78 @@ Improved Quran Browser with:
 import os
 import sys
 import logging
+from datetime import datetime
+
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import QUrl, QSize, Qt, QSettings, QTimer
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtCore import QStandardPaths, QSettings
 from search import QuranSearch  
 
+import sqlite3
+from pathlib import Path
 
 # Configure logging for debugging and error reporting.
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+class NotesManager:
+    def __init__(self):
+        # Get the writable location for application data
+        app_data_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
+        # Ensure the directory exists
+        app_data_path.mkdir(parents=True, exist_ok=True)
+        self.db_path = app_data_path / "quran_notes.db"
+        self._init_db()
+    
+    def _init_db(self):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    surah INTEGER NOT NULL,
+                    ayah INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    created TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_surah_ayah ON notes (surah, ayah)")
+    
+    def get_notes(self, surah, ayah):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT id, content, created 
+                FROM notes 
+                WHERE surah=? AND ayah=?
+                ORDER BY created DESC
+            """, (surah, ayah))
+            return [{"id": row[0], "content": row[1], "created": row[2]} 
+                    for row in cursor.fetchall()]
+    
+    def add_note(self, surah, ayah, content):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                INSERT INTO notes (surah, ayah, content)
+                VALUES (?, ?, ?)
+            """, (surah, ayah, content))
+            return cursor.lastrowid
+    
+    def update_note(self, note_id, new_content):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("""
+                UPDATE notes 
+                SET content = ?, created = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (new_content, note_id))
+    
+    def delete_note(self, note_id):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    
+    def delete_all_notes(self, surah, ayah):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("DELETE FROM notes WHERE surah=? AND ayah=?", (surah, ayah))
+
 
 
 def get_default_audio_directory():
@@ -51,6 +114,9 @@ def get_audio_directory():
         settings.setValue("AudioDirectory", default_dir)
         settings.sync()  # Write the changes to disk
     return settings.value("AudioDirectory")
+
+
+
 
 
 
@@ -118,33 +184,35 @@ class SearchWorker(QtCore.QThread):
             self.error_occurred.emit(str(e))
 
 # =============================================================================
-# STEP 3: Retain (or slightly modify) the SearchLineEdit, QuranDelegate, and DetailView.
+# STEP 3
 # =============================================================================
 class SearchLineEdit(QtWidgets.QLineEdit):
-    """A QLineEdit that supports navigating through search history."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.history = []
-        self.history_index = -1
+        self.history_max = 20
+        self.init_history()
 
-    def keyPressEvent(self, event):
-        if event.key() == QtCore.Qt.Key_Up:
-            if self.history:
-                if self.history_index == -1:
-                    self.history_index = len(self.history) - 1
-                elif self.history_index > 0:
-                    self.history_index -= 1
-                self.setText(self.history[self.history_index])
-        elif event.key() == QtCore.Qt.Key_Down:
-            if self.history and self.history_index != -1:
-                if self.history_index < len(self.history) - 1:
-                    self.history_index += 1
-                    self.setText(self.history[self.history_index])
-                else:
-                    self.history_index = -1
-                    self.clear()
-        else:
-            super().keyPressEvent(event)
+    def init_history(self):
+        self.history_menu = QtWidgets.QMenu(self)
+        self.history_list = QtWidgets.QListWidget()
+        self.history_menu.setLayout(QtWidgets.QVBoxLayout())
+        self.history_menu.layout().addWidget(self.history_list)
+        
+        self.history_list.itemClicked.connect(self.select_history_item)
+
+    def select_history_item(self, item):
+        self.setText(item.text())
+        self.returnPressed.emit()
+
+    def update_history(self, query):
+        if query and query not in self.history:
+            self.history.insert(0, query)
+            self.history = self.history[:self.history_max]
+            
+            self.history_list.clear()
+            for item in self.history:
+                self.history_list.addItem(item)
 
 class QuranDelegate(QtWidgets.QStyledItemDelegate):
     """Custom delegate for rendering Quran verses with proper RTL support."""
@@ -201,23 +269,40 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         return QSize(int(doc.idealWidth()) + 20, int(doc.size().height()))
 
 class DetailView(QtWidgets.QWidget):
-    """Detailed view for showing verse context."""
     backRequested = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.notes_widget = NotesWidget()
         self.initUI()
-
+        
+    
     def initUI(self):
-        layout = QtWidgets.QVBoxLayout(self)
+        # Split view
+        splitter = QtWidgets.QSplitter(Qt.Vertical)
+        
+        # Context View
+        context_widget = QtWidgets.QWidget()
+        context_layout = QtWidgets.QVBoxLayout(context_widget)
         self.back_button = QtWidgets.QPushButton("← Back to Results")
-        self.back_button.clicked.connect(self.backRequested.emit)
         self.text_browser = QtWidgets.QTextBrowser()
-        self.text_browser.setOpenExternalLinks(True)
-        layout.addWidget(self.back_button)
-        layout.addWidget(self.text_browser)
-
+        context_layout.addWidget(self.back_button)
+        context_layout.addWidget(self.text_browser)
+        
+        # Add widgets to splitter
+        splitter.addWidget(context_widget)
+        splitter.addWidget(self.notes_widget)
+        splitter.setSizes([400, 200])  # Initial sizes
+        
+        # Main layout
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(splitter)
+        
+        # Connections
+        self.back_button.clicked.connect(self.backRequested.emit)
+    
     def display_ayah(self, result, search_engine, version):
+        # Existing context display
         verses = search_engine.get_ayah_with_context(result['surah'], result['ayah'])
         html = []
         for verse in verses:
@@ -241,6 +326,108 @@ class DetailView(QtWidgets.QWidget):
             {''.join(html)}
         </html>
         """)
+        
+        # Update notes widget
+        self.notes_widget.set_ayah(result['surah'], result['ayah'])
+
+
+class NotesWidget(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.notes_manager = NotesManager()
+        self.current_surah = None
+        self.current_ayah = None
+        self.current_note_id = None
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        # Toolbar
+        toolbar = QtWidgets.QToolBar()
+        self.new_button = QtWidgets.QAction(QtGui.QIcon.fromTheme("document-new"), "New", self)
+        self.save_button = QtWidgets.QAction(QtGui.QIcon.fromTheme("document-save"), "Save", self)
+        self.delete_button = QtWidgets.QAction(QtGui.QIcon.fromTheme("edit-delete"), "Delete", self)
+        toolbar.addAction(self.new_button)
+        toolbar.addAction(self.save_button)
+        toolbar.addAction(self.delete_button)
+        
+        # Split view for notes list and editor
+        splitter = QtWidgets.QSplitter(Qt.Vertical)
+        
+        # Notes list
+        self.notes_list = QtWidgets.QListWidget()
+        self.notes_list.itemSelectionChanged.connect(self.on_note_selected)
+        
+        # Editor
+        self.editor = QtWidgets.QTextEdit()
+        self.editor.setPlaceholderText("Write your note here...")
+        
+        splitter.addWidget(self.notes_list)
+        splitter.addWidget(self.editor)
+        splitter.setSizes([200, 400])
+        
+        layout.addWidget(toolbar)
+        layout.addWidget(splitter)
+        
+        # Connections
+        self.new_button.triggered.connect(self.new_note)
+        self.save_button.triggered.connect(self.save_note)
+        self.delete_button.triggered.connect(self.delete_note)
+    
+    def set_ayah(self, surah, ayah):
+        self.current_surah = surah
+        self.current_ayah = ayah
+        self.current_note_id = None
+        self.load_notes()
+    
+    def load_notes(self):
+        self.notes_list.clear()
+        notes = self.notes_manager.get_notes(self.current_surah, self.current_ayah)
+        for note in notes:
+            item = QtWidgets.QListWidgetItem(note['content'])
+            item.setData(Qt.UserRole, note)
+            self.notes_list.addItem(item)
+        self.editor.clear()
+    
+    def on_note_selected(self):
+        selected = self.notes_list.currentItem()
+        if selected:
+            note = selected.data(Qt.UserRole)
+            self.current_note_id = note['id']
+            self.editor.setPlainText(note['content'])
+    
+    def new_note(self):
+        self.notes_list.clearSelection()
+        self.current_note_id = None
+        self.editor.clear()
+        self.editor.setFocus()
+    
+    def save_note(self):
+        if not (self.current_surah and self.current_ayah):
+            return
+        
+        content = self.editor.toPlainText().strip()
+        if not content:
+            return
+        
+        if self.current_note_id:
+            self.notes_manager.update_note(self.current_note_id, content)
+        else:
+            self.notes_manager.add_note(self.current_surah, self.current_ayah, content)
+        
+        self.load_notes()
+    
+    def delete_note(self):
+        if self.current_note_id:
+            self.notes_manager.delete_note(self.current_note_id)
+            self.load_notes()
+    
+    def delete_all_notes(self):
+        if self.current_surah and self.current_ayah:
+            self.notes_manager.delete_all_notes(self.current_surah, self.current_ayah)
+            self.load_notes()
+
 
 # =============================================================================
 # STEP 4: Main application window with all improvements.
@@ -256,6 +443,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.current_start_ayah = 0
         self.sequence_files = []
         self.current_sequence_index = 0
+        self.playing_one = False
+        self.playing_context = 0
 
         self.settings = QtCore.QSettings("MOSAID", "QuranSearch")
         self.init_ui()
@@ -266,6 +455,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.trigger_initial_search()
         self.player = QMediaPlayer()  # For audio playback
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
+        self.notes_manager = NotesManager()
 
 
     def init_ui(self):
@@ -340,7 +530,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.status_bar.addWidget(self.result_count, 0)
 
         # Center widget: copyright message (stretch factor 1)
-        center_label = QtWidgets.QLabel("© 2025 MOSAID, <a href='https://mosaid.xyz'>https://mosaid.xyz</a>")
+        center_label = QtWidgets.QLabel("© 2025 MOSAID, <a href='https://mosaid.xyz/quran-search'>https://mosaid.xyz</a>")
         center_label.setAlignment(QtCore.Qt.AlignCenter)
         center_label.setTextFormat(QtCore.Qt.RichText)
         center_label.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
@@ -369,19 +559,28 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.results_view.doubleClicked.connect(self.show_detail_view)
 
     def setup_shortcuts(self):
-        QtWidgets.QShortcut(QtGui.QKeySequence("Space"), self, activated=self.play_current)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Space"), self, activated=self.handle_space)
         QtWidgets.QShortcut(QtGui.QKeySequence("Escape"), self, activated=self.toggle_version)
         QtWidgets.QShortcut(QtGui.QKeySequence("Backspace"), self, activated=self.show_results_view)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, activated=self.input_focus)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+D"), self, activated=self.toggle_theme)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+P"), self, activated=lambda: self.play_current(count=6))
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+P"), self, activated=self.handle_ctrlp)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+S"), self, activated=self.stop_playback)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+A"), self.results_view, activated=self.play_current_surah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+B"), self, activated=self.backto_current_surah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+H"), self, activated=self.show_help_dialog)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+J"), self, activated=self.load_surah_from_current_ayah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+K"), self, activated=self.load_surah_from_current_playback)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+N"), self, activated=self.new_note)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Delete"), self, activated=self.delete_note)
 
+    def new_note(self):
+        if self.detail_view.isVisible():
+            self.detail_view.notes_widget.new_note()
+
+    def delete_note(self):
+        if self.detail_view.isVisible():
+            self.detail_view.notes_widget.delete_note()
 
     def showMessage(self, message, timeout=7000):
         # Save the current stylesheet.
@@ -409,6 +608,10 @@ class QuranBrowser(QtWidgets.QMainWindow):
         help_action = QtWidgets.QAction("Help", self)
         help_action.triggered.connect(self.show_help_dialog)
         menu.addAction(help_action)
+        exit_action = QtWidgets.QAction("Exit", self)
+        exit_action.triggered.connect(self.close)
+        menu.addAction(exit_action)
+
 
     def load_settings(self):
         geometry = self.settings.value("geometry")
@@ -471,7 +674,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
     def handle_surah_selection(self, index):
         if index < 0:
-            return
+            index = self.surah_combo.currentIndex()
         surah = index + 1
         try:
             results = self.search_engine.search_by_surah(surah)
@@ -534,7 +737,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
         current_ayah = self.current_start_ayah + max(self.current_sequence_index - 1, 0)
         self.load_surah_from_current_ayah(surah=self.current_surah, selected_ayah=current_ayah)
 
-
+    # def focus_notes(self):
+    #     if self.detail_view.isVisible():
+    #         self.detail_view.notes_widget.editor.setFocus()
 
     def search(self):
         if self.detail_view.isVisible():
@@ -545,6 +750,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         if not query and method == "Text":
             self.showMessage("Please enter a search query", 3000)
             return
+        self.search_input.update_history(query)
         self.status_bar.showMessage("Searching...", 2000)
 
         if (method == "Surah" and query.isdigit()) or method == "Surah FirstAyah LastAyah":
@@ -594,6 +800,15 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.results_view.show()
         self.results_view.setFocus()
 
+    def handle_space(self):
+        self.playing_one = True
+        self.playing_context = 0
+        self.play_current()
+
+    def handle_ctrlp(self):
+        self.playing_context = 6
+        self.play_current(count=6)
+
     def play_current(self, surah=None, ayah=None, count=1):
         """
         Play a single audio file or a sequence of files.
@@ -633,7 +848,6 @@ class QuranBrowser(QtWidgets.QMainWindow):
             else:
                 self.showMessage("Audio file not found", 3000)
             return
-
         # For sequence playback, store the surah and starting ayah.
         self.current_surah = int(surah)
         self.current_start_ayah = int(ayah)
@@ -679,6 +893,15 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 self._scroll_to_ayah(self.current_surah, current_ayah)
             self.current_sequence_index += 1
         else:
+            if self.playing_one:
+                self.playing_one = False
+                return
+            if self.playing_context:
+                if self.playing_context < 6:
+                    self.playing_context += 1
+                else:
+                    self.playing_context = 0
+                    return
             # End of current surah reached: increment surah (wrap around if needed).
             if self.current_surah < 114:
                 self.current_surah += 1
@@ -866,75 +1089,125 @@ class QuranBrowser(QtWidgets.QMainWindow):
             © 2025 All rights reserved<br><br>
             Quran text from Tanzil.net<br>
             GPL v3 Licensed<br><br>
-            <a href="https://mosaid.xyz">https://mosaid.xyz</a>"""
+            <a href="https://mosaid.xyz/quran-search">https://mosaid.xyz</a>"""
         )
 
     def show_help_dialog(self):
-        help_text = (
-            "<h2>Quran Search Help</h2>"
-            "<p>This application allows you to search and play audio for Quran verses. Features include:</p>"
-            "<ul>"
-            "<li><b>Surah Selection:</b> Use the dropdown to select a surah. The results list will display all verses of the selected surah.</li>"
-            "<li><b>Search Methods:</b> Choose between"
-                "<ul>"
-                "<li><b>Text</b>: Input arabic word/words to search the quran text</li>"
-                "<li><b>Surah search</b>: enter a surah number in the input field then Enter</li>"
-                "<li><b>Surah FirstAyah LastAyah</b>: use numbers eg, 2 255 or 2 255 280 to directly load ayat</li>"
-                "</ul>"
-            "<li><b>Ayah context:</b> Double click or Enter on a selected ayah, will show its context; 5 verses before\
-                and 5 after it, in text format that you can copy</li>"
-            "<li><b>Audio Playback:</b> with auto scroll current playing verse"
-                "<ul>"
-                "<li><b>Space:</b> Play the audio for the currently selected verse.</li>"
-                "<li><b>Ctrl+P:</b> Play the current ayah and the next five ayahs sequentially.</li>"
-                "<li><b>Ctrl+S:</b> Stop playback.</li>"
-                "<li><b>Ctrl+A:</b> (When in results view) Play the entire current surah. starting from selected verse</li>"
-                "<li><b>Ctrl+K:</b> (When playing a sequence) Jump back to the current playing surah - ayah </li>"
-                "</ul>"
-            "</li>"
-            "<li><b>UI Shortcuts:</b> "
-                "<ul>"
-                "<li><b>Ctrl+F:</b> Focus the search input.</li>"
-                "<li><b>Ctrl+D:</b> Toggle between dark and light themes.</li>"
-                "<li><b>Backspace:</b> Return from detail view to results view.</li>"
-                "<li><b>Escape:</b> Toggle the text version, uthmani and simplified arabic.</li>"
-                "<li><b>Ctrl+J:</b> Load surah from current Ayah.</li>"
-                "<li><b>Ctrl+B:</b> Go back to current surah.</li>"
-                "</ul>"
-            "</li>"
-            "<li><b>Audio Directory:</b> Use the 'Set Audio Directory' menu item to change where audio files are loaded from.\
-                Files must be named like 002001.mp3.</li>"
-            "</ul>"
-            "<p syle='padding-left:10px;'>If you need further assistance, please visit our website : <a href='https://mosaid.xyz'>https://mosaid.xyz</a>.</p>"
-        )
+        help_text = """
+        <html>
+        <body style="text-align: right; direction: rtl; margin: 10px; font-family: Arial; font-size: 12pt;">
+            <div style="margin-bottom: 20px;">
+                <h2 style="margin: 0 0 15px 0;">مساعدة بحث القرآن الكريم</h2>
+                <div style="margin-bottom: 15px;">:يتيح لك هذا التطبيق البحث في آيات القرآن الكريم وتشغيلها صوتياً. المميزات تشمل</div>
+                
+                <div style="margin-right: 20px; margin-bottom: 10px;">
+                    <b>اختيار السورة:</b> استخدم القائمة المنسدلة لاختيار سورة. ستظهر القائمة جميع آيات السورة المختارة.
+                </div>
+                
+                <div style="margin-right: 20px; margin-bottom: 10px;">
+                    <b>طرق البحث:</b> اختر بين
+                    <div style="margin-right: 40px; margin-top: 5px;">
+                        <div style="margin-bottom: 5px;"><b>بحث نصي:</b> اكتب كلمة/كلمات عربية للبحث في نص القرآن• </div>
+                        <div style="margin-bottom: 5px;"><span style="direction: ltr; unicode-bidi: embed;">\u202aEnter\u202c</span> <b>بحث السورة:</b> اكتب رقم السورة في حقل الإدخال ثم اضغط •</div>
+                        <div><span style="direction: ltr; unicode-bidi: embed;">\u202a2 255\u202c</span> أو <span style="direction: ltr; unicode-bidi: embed;">\u202a2 255 280\u202c</span> <b>السورة الآية الأولى الآية الأخيرة:</b> استخدم أرقام مثل •</div>
+                    </div>
+                </div>
+                
+                <div style="margin-right: 20px; margin-bottom: 10px;">
+                    <p style="text-align: right;">
+                        <span><b>سياق الآية:</b></span>
+                        <span> النقر المزدوج أو زر </span>
+<span style="direction: ltr; unicode-bidi: embed; display: inline-block; padding: 0 5px; font-weight: bold;">⏎</span>
+                        <span>على الآية المحددة يعرض سياقها؛ 5 آيات قبلها و5 بعدها بصيغة نصية قابلة للنسخ.</span>
+                    </p>
+                </div>
+
+                
+                <div style="margin-right: 20px; margin-bottom: 10px;">
+                    <b>تشغيل الصوت:</b> مع إمكانية التمرير التلقائي للآية الموالية ثم السورة الموالية
+                    <div style="margin-right: 40px; margin-top: 5px;">
+                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aSpace\u202c</span>:  تشغيل الآية المحددة فقط •</div>
+                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+P\u202c</span>: تشغيل الآية الحالية والخمس التالية فقط•</div>
+                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+S\u202c</span>: إيقاف التشغيل •</div>
+                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+A\u202c</span>: تشغيل السورة كاملة •</div>
+                        <div> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+B\u202c</span>: العودة إلى السورة التي تستمع إليها حاليا •</div>
+                    </div>
+                </div>
+                
+                <div style="margin-right: 20px; margin-bottom: 20px;">
+                    <b>اختصارات الواجهة:</b>
+                    <div style="margin-right: 40px; margin-top: 5px;">
+                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+F\u202c</span>: التركيز على حقل البحث •</div>
+                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+D\u202c</span>: التبديل بين الوضع الليلي والنهاري •</div>
+                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aBackspace\u202c</span>: العودة إلى قائمة النتائج •</div>
+                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aEscape\u202c</span>: التبديل بين الخط العثماني والمبسط •</div>
+                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+H\u202c</span>: عرض هذه النافذة •</div>
+                        <div> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+K\u202c</span>:   العودة إلى سورة البحث الحالية(في القائمة) •</div>
+                        <div> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+J\u202c</span>:   عرض السورة من خلال الأية المحددة •</div>
+
+                    </div>
+                </div>
+                <div style="margin-right: 20px; margin-top: 15px;">
+                    <b>مجلد الصوت:</b> استخدم عنصر القائمة 'تعيين مجلد الصوت' لتغيير مكان ملفات الصوت. يجب أن تكون    
+                    <p style="margin-right: 40px">
+                    زر موقعنا لمعرفة كيفية الحصول عليها . <span style="direction: ltr; unicode-bidi: embed;">\u202a002001.mp3\u202c</span>  الملفات بأسماء مثل 
+                    </p>
+                </div>
+                <div style="text-align: center; margin-top: 20px;">
+                    للمساعدة الإضافية، يرجى زيارة موقعنا:<br><br>
+                    <a href="https://mosaid.xyz/quran-search" style="direction: ltr; unicode-bidi: embed;">\u202ahttps://mosaid.xyz\u202c</a>
+                    <br><br>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
         # Create a custom dialog.
         dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle("Help")
+        dialog.setWindowTitle("مساعدة")
         dialog.setModal(True)
-        dialog.setFixedSize(680, 500)  
+        dialog.setFixedSize(800, 400)
+
         # Set up a vertical layout.
         layout = QtWidgets.QVBoxLayout(dialog)
-        
+
+        # Create a QScrollArea to make the content scrollable.
+        scroll_area = QtWidgets.QScrollArea(dialog)
+        scroll_area.setWidgetResizable(True)  # Enable resizing of the content within the scroll area.
+
+        # Create a container widget for the help text.
+        content_widget = QtWidgets.QWidget()
+        content_layout = QtWidgets.QVBoxLayout(content_widget)
+
         # Use a QLabel to display the help text.
-        label = QtWidgets.QLabel(help_text, dialog)
+        label = QtWidgets.QLabel(help_text, content_widget)
         label.setWordWrap(True)
-        layout.addWidget(label)
-        
+        label.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
+        label.setOpenExternalLinks(True)
+        content_layout.addWidget(label)
+
+
+
+        # Set the container widget as the scroll area's widget.
+        scroll_area.setWidget(content_widget)
+
+        # Add the scroll area to the dialog's layout.
+        layout.addWidget(scroll_area)
+
         # Add an OK button.
         button_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok)
         button_box.accepted.connect(dialog.accept)
         layout.addWidget(button_box)
-        
-        # Adjust the dialog's size.
-        dialog.adjustSize()
 
         # Center the dialog relative to the parent window.
         parent_geom = self.frameGeometry()
         dialog_geom = dialog.frameGeometry()
         dialog_geom.moveCenter(parent_geom.center())
         dialog.move(dialog_geom.topLeft())
-        
+
         dialog.exec_()
+
 
 if __name__ == "__main__":
     from PyQt5.QtGui import QGuiApplication
