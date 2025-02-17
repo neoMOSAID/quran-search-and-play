@@ -6,20 +6,22 @@
     <style>
         body {
             font-family: 'Amiri', 'Arial Arabic', sans-serif;
-            line-height: 1.2;
+            line-height: 1.6;
             margin: 30px;
             background-color: #f5f5f5;
             color: #333;
-            font-size: 16pt;
+            font-size: 18px;
         }
         
         h1, h2, h3 {
             color: #2c5f2d;
             border-bottom: 2px solid #2c5f2d;
-            padding-bottom: 5px;
+            padding-bottom: 8px;
+            margin-top: 30px;
         }
         
         .section {
+            background: white;
             padding: 25px;
             margin: 20px 0;
             border-radius: 10px;
@@ -28,12 +30,13 @@
         
         .shortcut-key {
             display: inline-block;
-            padding: 3px 8px;
+            padding: 5px 10px;
             background: #e0e0e0;
             border-radius: 4px;
             margin: 0 5px;
             font-family: monospace;
             direction: ltr;
+            font-size: 14px;
         }
         
         .note {
@@ -44,8 +47,45 @@
         }
         
         .feature-list {
+            padding-right: 30px;
+            list-style-type: none;
+        }
+        
+        .feature-list li {
+            margin-bottom: 10px;
             padding-right: 20px;
-            list-style-type: arabic-indic;
+            position: relative;
+        }
+        
+        .feature-list li:before {
+            content: "•";
+            color: #2c5f2d;
+            position: absolute;
+            right: -15px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 25px 0;
+            background: white;
+        }
+        
+        th, td {
+            padding: 12px;
+            border: 1px solid #ddd;
+            text-align: right;
+        }
+        
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+        
+        .category-header {
+            background-color: #2c5f2d !important;
+            color: white;
+            font-size: 1.1em;
         }
         
         a {
@@ -53,46 +93,10 @@
             text-decoration: none;
         }
         
-        .toc {
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 30px;
-        }
-        
-        table {
-            width: 100%;
-            position: relative;
-            border-collapse: collapse;
+        .table-container {
+            overflow-x: auto;
             margin: 20px 0;
         }
-        
-        th, td {
-            border: 1px solid #ddd;
-            text-align: right;
-        }
-        
-        th {
-            background: #74787d;
-        }
-        .table-container {
-            max-height: 400px;
-            overflow-y: auto;
-            display: block;
-        }
-        
-        thead th {
-            position: sticky;
-            top: 0;
-            background: #f8f9fa !important;
-            z-index: 1;
-        }
-        
-        /* Force RTL direction */
-        table, th, td {
-            direction: rtl;
-            text-align: right !important;
-        }
-    
     </style>
 </head>
 <body>
@@ -107,16 +111,14 @@
                 <li><a href="#section3">أنواع البحث</a></li>
                 <li><a href="#section4">التلاوة الصوتية</a></li>
                 <li><a href="#section5">إدارة الملاحظات</a></li>
-                <li><a href="#section6">الإعدادات والتخصيص</a></li>
+                <li><a href="#section6">الميزات المتقدمة</a></li>
                 <li><a href="#section7">اختصارات لوحة المفاتيح</a></li>
                 <li><a href="#section8">الاستيراد والتصدير</a></li>
-                <li><a href="#section9">استكشاف الأخطاء</a></li>
-                <li><a href="#section10">الدعم الفني</a></li>
+                <li><a href="#section9">الدعم الفني</a></li>
             </ol>
         </div>
     </div>
 
-    <!-- Section 1: Introduction -->
     <div class="section" id="section1">
         <h2>1. المقدمة</h2>
         <p>يمتلك البرنامج المميزات التالية:</p>
@@ -124,68 +126,65 @@
             <li>بحث متقدم في نص القرآن الكريم بخطوط عثمانية ومبسطة</li>
             <li>تشغيل التلاوات الصوتية مع مزامنة النص</li>
             <li>نظام متكامل لإدارة الملاحظات والتدبرات</li>
-            <li>واجهة مستخدم قابلة للتخصيص (الوضع الليلي/النهاري)</li>
+            <li>إنشاء دورات دراسية وحفظ التقدم</li>
+            <li>استيراد/تصدير الملاحظات بصيغة CSV</li>
+            <li>واجهة قابلة للتخصيص (وضع ليلي/نهاري)</li>
             <li>دعم كامل للغة العربية وتصميم RTL</li>
-            <li>إمكانية تصدير واستيراد الملاحظات بصيغة CSV</li>
         </ul>
     </div>
 
-    <!-- Section 2: Interface -->
     <div class="section" id="section2">
         <h2>2. واجهة المستخدم</h2>
         <h3>المكونات الرئيسية:</h3>
-        <ol class="feature-list">
+        <ul class="feature-list">
             <li>شريط البحث العلوي:
-                <ul>
+                <ul class="feature-list">
                     <li>قائمة السور (114 سورة)</li>
                     <li>خيارات طريقة البحث (نصي، سورة، نطاق آيات)</li>
-                    <li>حقل إدخال البحث الذكي مع تاريخ البحث</li>
-                    <li>أزرار التحكم (مسح، إعدادات)</li>
+                    <li>حقل إدخال بحث ذكي مع اقتراحات</li>
                 </ul>
             </li>
             <li>منطقة النتائج:
-                <ul>
+                <ul class="feature-list">
                     <li>عرض الآيات المطابقة مع الترقيم القرآني</li>
                     <li>تمرير سلس مع تحميل تلقائي للنتائج</li>
-                    <li>إمكانية التحديد والتنقل بالأسهم</li>
+                    <li>إمكانية التحديد بالأسهم</li>
                 </ul>
             </li>
             <li>منطقة التفاصيل:
-                <ul>
+                <ul class="feature-list">
                     <li>عرض السياق القرآني (5 آيات قبل وبعد)</li>
-                    <li>محرر الملاحظات مع خيارات الحفظ والحذف</li>
-                    <li>عرض تاريخ الإنشاء والتعديل للملاحظات</li>
+                    <li>محرر ملاحظات متقدم مع تنسيق النص</li>
+                    <li>عرض تاريخ الإنشاء والتعديل</li>
                 </ul>
             </li>
-        </ol>
+        </ul>
     </div>
 
-    <!-- Section 3: Search Types -->
     <div class="section" id="section3">
         <h2>3. أنواع البحث</h2>
-        <h3>1.3 البحث النصي:</h3>
+        <h3>البحث النصي:</h3>
         <ul class="feature-list">
-            <li>يدعم البحث بالكلمات المفتاحية العربية</li>
-            <li>مثال: البحث عن "الرحمن الرحيم"</li>
+            <li>بحث بالكلمات المفتاحية العربية</li>
+            <li>مثال: "الرحمن الرحيم"</li>
             <li>حساس لحالة التشكيل</li>
         </ul>
 
-        <h3>2.3 البحث بالسورة:</h3>
+        <h3>البحث بالسورة:</h3>
         <ul class="feature-list">
             <li>اختيار السورة من القائمة المنسدلة</li>
             <li>إدخال رقم السورة مباشرة (1-114)</li>
-            <li>مثال: "5" لعرض سورة المائدة كاملة</li>
+            <li>مثال: "5" لعرض سورة المائدة</li>
         </ul>
 
-        <h3>3.3 البحث بنطاق الآيات:</h3>
+        <h3>البحث بنطاق الآيات:</h3>
         <ul class="feature-list">
-            <li>صيغة البحث: [رقم السورة] [الآية الأولى] [الآية الأخيرة]</li>
-            <li>مثال 1: "2 255" لعرض آية الكرسي فقط</li>
-            <li>مثال 2: "2 255 260" لعرض الآيات من 255 إلى 260 من البقرة</li>
+            <li>صيغة: [رقم السورة] [الآية الأولى] [الآية الأخيرة]</li>
+            <li>مثال 1: "2 255" لآية الكرسي</li>
+            <li>مثال 2: "2 255 260" للآيات 255-260 من البقرة</li>
         </ul>
     </div>
 
-    <!-- Section 4: Audio Playback -->
     <div class="section" id="section4">
         <h2>4. التلاوة الصوتية</h2>
         <h3>مميزات التشغيل:</h3>
@@ -193,19 +192,18 @@
             <li>تشغيل آية محددة (<span class="shortcut-key">Space</span>)</li>
             <li>تشغيل نطاق آيات (<span class="shortcut-key">Ctrl+R</span>)</li>
             <li>تشغيل سورة كاملة (<span class="shortcut-key">Ctrl+A</span>)</li>
-            <li>التشغيل التتابعي التلقائي بين السور</li>
-            <li>مؤشر مرئي للآية قيد التشغيل</li>
+            <li>تشغيل جميع النتائج (<span class="shortcut-key">Ctrl+Shift+P</span>)</li>
+            <li>القفز التلقائي للآية التالية</li>
         </ul>
 
-        <h3>إدارة الملفات الصوتية:</h3>
-        <ol class="feature-list">
-            <li>تحديد مجلد الصوتيات من القائمة (Menu → Set Audio Directory)</li>
-            <li>صيغة الملفات: SSSAAA.mp3 (SSS = رقم السورة، AAA = رقم الآية)</li>
+        <h3>إعدادات الصوت:</h3>
+        <ul class="feature-list">
+            <li>تحديد مجلد الصوتيات من القائمة</li>
+            <li>صيغة الملفات: SSSAAA.mp3 (3 أرقام للسورة، 3 أرقام للآية)</li>
             <li>مثال: 001001.mp3 لسورة الفاتحة آية 1</li>
-        </ol>
+        </ul>
     </div>
 
-    <!-- Section 5: Notes Management -->
     <div class="section" id="section5">
         <h2>5. إدارة الملاحظات</h2>
         <h3>العمليات الأساسية:</h3>
@@ -213,148 +211,153 @@
             <li>إضافة ملاحظة جديدة (<span class="shortcut-key">Ctrl+N</span>)</li>
             <li>حفظ التعديلات (<span class="shortcut-key">Ctrl+S</span>)</li>
             <li>حذف الملاحظات (<span class="shortcut-key">Ctrl+Delete</span>)</li>
-            <li>عرض التاريخ التلقائي للإنشاء/التعديل</li>
+            <li>حذف جميع ملاحظات آية محددة</li>
         </ul>
 
         <h3>المميزات المتقدمة:</h3>
-        <ol class="feature-list">
-            <li>عرض الملاحظات حسب تاريخ التعديل</li>
-            <li>بحث سريع ضمن الملاحظات</li>
-            <li>معاينة الملاحظات في القائمة الجانبية</li>
-            <li>تنسيق النص الأساسي في المحرر</li>
-        </ol>
+        <ul class="feature-list">
+            <li>استيراد/تصدير بصيغة CSV (<span class="shortcut-key">Ctrl+I/Ctrl+E</span>)</li>
+            <li>إنشاء دورات دراسية مخصصة</li>
+            <li>التنقل بين الدورات (<span class="shortcut-key">← →</span>)</li>
+            <li>حفظ تلقائي للتقدم في الدورات</li>
+        </ul>
     </div>
 
-    <!-- Continue with remaining sections following the same pattern -->
+    <div class="section" id="section6">
+        <h2>6. الميزات المتقدمة</h2>
+        <h3>منظم الآيات:</h3>
+        <ul class="feature-list">
+            <li>فتح المنظم (<span class="shortcut-key">Ctrl+Shift+A</span>)</li>
+            <li>إنشاء قوائم مخصصة من الآيات</li>
+            <li>إضافة نطاقات آيات بالصيغة: a سورة آية_بداية آية_نهاية</li>
+            <li>حفظ وإدارة قوائم التشغيل</li>
+        </ul>
+
+        <h3>التخصيص:</h3>
+        <ul class="feature-list">
+            <li>تبديل الوضع الليلي (<span class="shortcut-key">Ctrl+D</span>)</li>
+            <li>تغيير نوع الخط (<span class="shortcut-key">Esc</span>)</li>
+            <li>ضبط حجم الخط</li>
+        </ul>
+    </div>
 
     <div class="section" id="section7">
         <h2>7. اختصارات لوحة المفاتيح</h2>
-        <div style="overflow-x: auto;">
-            <table dir="rtl" style="width: 100%; margin: 20px 0; text-align: right;">
-                <colgroup>
-                    <col style="width: 25%;">
-                    <col style="width: 75%;">
-                </colgroup>
+        <div class="table-container">
+            <table>
                 <thead>
                     <tr>
-                        <th style="text-align: right;">الاختصار</th>
-                        <th style="text-align: right;">الوظيفة</th>
+                        <th class="category-header">الفئة</th>
+                        <th class="category-header">الاختصار</th>
+                        <th class="category-header">الوظيفة</th>
                     </tr>
                 </thead>
                 <tbody>
+                    <tr><td colspan="3" class="category-header">التنقل والبحث</td></tr>
                     <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Ctrl + F</span>
-                        </td>
-                        <td style="text-align: right;">الانتقال إلى حقل البحث</td>
+                        <td>التنقل</td>
+                        <td><span class="shortcut-key">Ctrl + F</span></td>
+                        <td>الانتقال إلى حقل البحث</td>
                     </tr>
                     <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Ctrl + D</span>
-                        </td>
-                        <td style="text-align: right;">تبديل الوضع الليلي/النهاري</td>
+                        <td>التنقل</td>
+                        <td><span class="shortcut-key">Ctrl + J</span></td>
+                        <td>الانتقال إلى سورة الآية المحددة</td>
                     </tr>
                     <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Ctrl + H</span>
-                        </td>
-                        <td style="text-align: right;">فتح دليل المستخدم</td>
+                        <td>التنقل</td>
+                        <td><span class="shortcut-key">Ctrl + K</span></td>
+                        <td>العودة إلى سورة التشغيل الحالية</td>
+                    </tr>
+                    
+                    <tr><td colspan="3" class="category-header">التشغيل الصوتي</td></tr>
+                    <tr>
+                        <td>الصوت</td>
+                        <td><span class="shortcut-key">Space</span></td>
+                        <td>تشغيل/إيقاف الآية المحددة</td>
                     </tr>
                     <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Ctrl + J</span>
-                        </td>
-                        <td style="text-align: right;">الانتقال إلى سورة الآية المحددة</td>
+                        <td>الصوت</td>
+                        <td><span class="shortcut-key">Ctrl + A</span></td>
+                        <td>تشغيل السورة كاملة</td>
                     </tr>
                     <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Ctrl + K</span>
-                        </td>
-                        <td style="text-align: right;">العودة إلى سورة التشغيل الحالية</td>
+                        <td>الصوت</td>
+                        <td><span class="shortcut-key">Ctrl + Shift + P</span></td>
+                        <td>تشغيل جميع النتائج</td>
+                    </tr>
+                    
+                    <tr><td colspan="3" class="category-header">إدارة الملاحظات</td></tr>
+                    <tr>
+                        <td>الملاحظات</td>
+                        <td><span class="shortcut-key">Ctrl + N</span></td>
+                        <td>ملاحظة جديدة</td>
                     </tr>
                     <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Ctrl + A</span>
-                        </td>
-                        <td style="text-align: right;">تشغيل السورة كاملة</td>
+                        <td>الملاحظات</td>
+                        <td><span class="shortcut-key">Ctrl + S</span></td>
+                        <td>حفظ الملاحظة</td>
                     </tr>
                     <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Ctrl + P</span>
-                        </td>
-                        <td style="text-align: right;">تشغيل الآية مع السياق (5 آيات بعدها)</td>
+                        <td>الملاحظات</td>
+                        <td><span class="shortcut-key">Ctrl + E</span></td>
+                        <td>تصدير الملاحظات</td>
+                    </tr>
+                    
+                    <tr><td colspan="3" class="category-header">الإعدادات العامة</td></tr>
+                    <tr>
+                        <td>التخصيص</td>
+                        <td><span class="shortcut-key">Ctrl + D</span></td>
+                        <td>تبديل الوضع الليلي</td>
                     </tr>
                     <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Ctrl + R</span>
-                        </td>
-                        <td style="text-align: right;">تكرار نطاق آيات محدد</td>
+                        <td>التخصيص</td>
+                        <td><span class="shortcut-key">Esc</span></td>
+                        <td>تبديل نوع الخط</td>
                     </tr>
                     <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Ctrl + S</span>
-                        </td>
-                        <td style="text-align: right;">حفظ الملاحظة/إيقاف التشغيل</td>
-                    </tr>
-                    <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Ctrl + N</span>
-                        </td>
-                        <td style="text-align: right;">ملاحظة جديدة</td>
-                    </tr>
-                    <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Ctrl + Delete</span>
-                        </td>
-                        <td style="text-align: right;">حذف الملاحظة</td>
-                    </tr>
-                    <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Esc</span>
-                        </td>
-                        <td style="text-align: right;">تبديل الخط العثماني/المبسط</td>
-                    </tr>
-                    <tr>
-                        <td dir="ltr" style="text-align: right; font-family: monospace;">
-                            <span class="shortcut-key">Backspace</span>
-                        </td>
-                        <td style="text-align: right;">العودة إلى قائمة النتائج</td>
+                        <td>التخصيص</td>
+                        <td><span class="shortcut-key">Backspace</span></td>
+                        <td>العودة للنتائج</td>
                     </tr>
                 </tbody>
             </table>
         </div>
     </div>
 
-    <!-- Section 10: Support -->
-    <div class="section" id="section10">
-        <h2>10. الدعم الفني</h2>
-        <p>للاستفسارات والدعم التقني:</p>
+    <div class="section" id="section8">
+        <h2>8. الاستيراد والتصدير</h2>
+        <ul class="feature-list">
+            <li>تصدير جميع الملاحظات بصيغة CSV</li>
+            <li>استيراد ملاحظات من ملفات CSV</li>
+            <li>حفظ تلقائي للإعدادات</li>
+            <li>استعادة الإعدادات الافتراضية</li>
+        </ul>
+    </div>
+
+    <div class="section" id="section9">
+        <h2>9. الدعم الفني</h2>
         <ul class="feature-list">
             <li>البريد الإلكتروني: <a href="mailto:support@mosaid.xyz">support@mosaid.xyz</a></li>
             <li>الموقع الإلكتروني: <a href="https://mosaid.xyz/quran-search">mosaid.xyz/quran-search</a></li>
             <li>قناة التليجرام: <a href="https://t.me/quran_search_support">t.me/quran_search_support</a></li>
-            <li>ساعات الدعم: الأحد - الخميس (٩ص - ٥م توقيت مكة)</li>
+            <li>ساعات الدعم: الأحد - الخميس (9:00 ص - 5:00 م توقيت مكة)</li>
         </ul>
     </div>
-</body>
-<script>
-    // Add smooth scrolling functionality
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-        anchor.addEventListener('click', function (e) {
-            e.preventDefault();
-            const target = document.querySelector(this.getAttribute('href'));
-            if (target) {
-                target.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'start'
-                });
-            }
-        });
-    });
-    </script>
-    
-    <style>
-    /* Add fixed header and scrolling */
 
-    </style>
+    <script>
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+    </script>
+</body>
 </html>

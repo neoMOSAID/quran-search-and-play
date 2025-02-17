@@ -158,6 +158,15 @@ class NotesManager:
             """, (surah, ayah, content))
             return cursor.fetchone()[0] > 0
         
+    def has_note(self, surah, ayah):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM notes WHERE surah=? AND ayah=?",
+                (surah, ayah)
+            )
+            count = cursor.fetchone()[0]
+            return count > 0
+            
     def save_course(self, course_id, title, items):
         items_json = json.dumps(items)
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -307,6 +316,7 @@ class SearchWorker(QtCore.QThread):
 
     def __init__(self, search_engine, method, query, parent=None):
         super().__init__(parent)
+        self.parent = parent  
         self.search_engine = search_engine
         self.method = method
         self.query = query
@@ -330,6 +340,13 @@ class SearchWorker(QtCore.QThread):
                     results = []
             else:
                 results = []
+            
+            for result in results:
+                if self.parent.notes_manager.has_note(result['surah'], result['ayah']):
+                    #bullet = "● "  # smaller bullet than "●"
+                    bullet = "<span style='font-size:32px;'>•</span> "
+                    result['text_simplified'] = bullet + result['text_simplified']
+                    result['text_uthmani'] = bullet + result['text_uthmani']
             self.results_ready.emit(results)
         except Exception as e:
             logging.exception("Error during search")
@@ -970,6 +987,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.results_count_int = 0
         self.playing_ayah_range = False
 
+        self.notes_manager = NotesManager()
+
         self.settings = QtCore.QSettings("MOSAID", "QuranSearch")
         self.init_ui()
         self.setup_connections()
@@ -979,7 +998,6 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.trigger_initial_search()
         self.player = QMediaPlayer()  # For audio playback
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
-        self.notes_manager = NotesManager()
 
 
     def init_ui(self):
@@ -1112,6 +1130,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+N"), self, activated=self.new_note)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Delete"), self, activated=self.delete_note)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+A"), self, activated=self.show_ayah_selector)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+P"), self, activated=self.play_all_results)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Left"), self, activated=self.navigate_surah_left)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Right"), self, activated=self.navigate_surah_right)
 
 
     def new_note(self):
@@ -1148,6 +1169,12 @@ class QuranBrowser(QtWidgets.QMainWindow):
         try:
             results = self.search_engine.search_by_surah_ayah(surah, start, end)
             if results:
+                for result in results:
+                    if self.notes_manager.has_note(result['surah'], result['ayah']):
+                        #bullet = "◉ "  # smaller bullet than "●" "• "
+                        bullet = "<span style='font-size:32px;'>•</span> "
+                        result['text_simplified'] = bullet + result['text_simplified']
+                        result['text_uthmani'] = bullet + result['text_uthmani']
                 self.model.updateResults(results)
                 self.current_surah = surah
                 self.current_start_ayah = start
@@ -1318,6 +1345,12 @@ class QuranBrowser(QtWidgets.QMainWindow):
         surah = index + 1
         try:
             results = self.search_engine.search_by_surah(surah)
+            for result in results:
+                if self.notes_manager.has_note(result['surah'], result['ayah']):
+                    #bullet = "◉ "  # smaller bullet than "●" "• "
+                    bullet = "<span style='font-size:32px;'>•</span> "
+                    result['text_simplified'] = bullet + result['text_simplified']
+                    result['text_uthmani'] = bullet + result['text_uthmani']
             self.update_results(results, f"Surah {surah} (Automatic Selection)")
         except Exception as e:
             logging.exception("Error during surah selection")
@@ -1348,6 +1381,12 @@ class QuranBrowser(QtWidgets.QMainWindow):
         # Load the full surah using your search engine.
         try:
             results = self.search_engine.search_by_surah(surah)
+            for result in results:
+                if self.notes_manager.has_note(result['surah'], result['ayah']):
+                    #bullet = "◉ "  # smaller bullet than "●" "• "
+                    bullet = "<span style='font-size:32px;'>•</span> "
+                    result['text_simplified'] = bullet + result['text_simplified']
+                    result['text_uthmani'] = bullet + result['text_uthmani']
             self.update_results(results, f"Surah {surah} (Automatic Selection)")
         except Exception as e:
             logging.exception("Error loading surah")
@@ -1359,6 +1398,18 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         # Scroll to the specified ayah.
         self._scroll_to_ayah(surah, selected_ayah)
+
+    def navigate_surah_left(self):
+        current_index = self.surah_combo.currentIndex()
+        if current_index > 0:
+            self.surah_combo.setCurrentIndex(current_index - 1)
+            self.handle_surah_selection(self.surah_combo.currentIndex())
+
+    def navigate_surah_right(self):
+        current_index = self.surah_combo.currentIndex()
+        if current_index < self.surah_combo.count() - 1:
+            self.surah_combo.setCurrentIndex(current_index + 1)
+            self.handle_surah_selection(self.surah_combo.currentIndex())
 
 
     def load_surah_from_current_playback(self):
@@ -1408,7 +1459,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 pass
 
         # Start the search in a background thread.
-        self.search_worker = SearchWorker(self.search_engine, method, query)
+        self.search_worker = SearchWorker(self.search_engine, method, query,parent=self)
         self.search_worker.results_ready.connect(self.handle_search_results)
         self.search_worker.error_occurred.connect(lambda error: self.showMessage(f"Search error: {error}", 3000))
         self.search_worker.start()
@@ -1569,6 +1620,51 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.current_sequence_index = 0
         self.play_next_file()
 
+    def play_all_results(self):
+        """Play all verses in the current search results list."""
+        if not self.model.results:
+            self.showMessage("No results to play", 3000)
+            return
+
+        audio_dir = get_audio_directory()
+        self.sequence_files = []
+        self.sequence_rows = []  # Track which model rows we're playing
+
+        # Build list of valid audio files and their corresponding result rows
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            result = self.model.data(index, Qt.UserRole)
+            if not result:
+                continue
+            
+            try:
+                surah = int(result['surah'])
+                ayah = int(result['ayah'])
+            except (KeyError, ValueError):
+                continue
+
+            file_path = os.path.join(audio_dir, f"{surah:03d}{ayah:03d}.mp3")
+            if os.path.exists(file_path):
+                self.sequence_files.append(os.path.abspath(file_path))
+                self.sequence_rows.append(row)
+            else:
+                self.showMessage(f"Audio not found: Surah {surah} Ayah {ayah}", 3000)
+
+        if self.sequence_files:
+            index = self.results_view.currentIndex()
+            self.current_sequence_index = 0
+            if index.isValid():
+                result = self.model.data(index, Qt.UserRole)
+                try:
+                    selected_ayah = int(result.get('ayah'))
+                    self.current_sequence_index = selected_ayah -1
+                except Exception as e:
+                    pass
+            self.playing_ayah_range = True
+            self.status_bar.showMessage(f"Playing {len(self.sequence_files)} results...", 3000)
+            self.play_next_file()
+        else:
+            self.showMessage("No audio files found in results", 3000)
 
     def play_next_file(self):
         """
@@ -1578,18 +1674,19 @@ class QuranBrowser(QtWidgets.QMainWindow):
         """
         maxx = len(self.sequence_files)
         if self.current_sequence_index < maxx:
-            chapter = self.search_engine.get_chapter_name(self.current_surah)
-            self.status_msg = f"<span dir='rtl' style='text-align: right'> إستماع إلى سورة {chapter}  {self.current_sequence_index+1}/{maxx}</span>"
-            # Continue playing the current surah.
             file_path = self.sequence_files[self.current_sequence_index]
+            current_surah = int(os.path.basename(file_path)[:3])
+            current_ayah = int(os.path.basename(file_path)[3:6])
+            chapter = self.search_engine.get_chapter_name(current_surah)
+            self.status_msg = f"<span dir='rtl' style='text-align: right'> إستماع إلى الآية {current_ayah}   من سورة {chapter}  {self.current_sequence_index+1}/{maxx}</span>"
+            # Continue playing the current surah.
             url = QUrl.fromLocalFile(file_path)
             self.player.setMedia(QMediaContent(url))
             self.player.play()
 
             # Calculate the current ayah being played.
-            current_ayah = self.current_start_ayah + self.current_sequence_index
             if self.results_view.isVisible():
-                self._scroll_to_ayah(self.current_surah, current_ayah)
+                self._scroll_to_ayah(current_surah, current_ayah)
             self.current_sequence_index += 1
         else:
             if self.playing_one:
