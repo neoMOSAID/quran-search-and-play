@@ -28,13 +28,16 @@ def create_virtual_environment(install_dir):
         sys.exit(1)
     return venv_path
 
-def install_requirements(venv_path, install_dir):
-    """Install dependencies from requirements.txt using the virtual environment's pip."""
-    req_file = os.path.join(install_dir, "requirements.txt")
-    if not os.path.exists(req_file):
-        print("No requirements.txt found in", install_dir)
-        return
 
+def install_requirements(venv_path, install_dir): 
+    """Install dependencies from requirements.txt using the virtual environment's pip. 
+    If installation fails (e.g., due to version conflicts for PyQt5 or PyQtWebEngine),
+    it will attempt to install these two packages individually without version restrictions. """ 
+    req_file = os.path.join(install_dir, "requirements.txt") 
+    if not os.path.exists(req_file): 
+        print("No requirements.txt found in", install_dir) 
+        return
+    
     print("Installing requirements from:", req_file)
     # On Windows, the pip executable is located in the Scripts folder.
     pip_executable = os.path.join(venv_path, "Scripts", "pip.exe")
@@ -44,8 +47,14 @@ def install_requirements(venv_path, install_dir):
     try:
         subprocess.check_call([pip_executable, "install", "-r", req_file])
     except subprocess.CalledProcessError as e:
-        print("Error installing requirements:", e)
-        sys.exit(1)
+        print("Error installing requirements with specified versions:", e)
+        print("No matching versions found. Trying to install PyQt5 and PyQtWebEngine individually without version restrictions.")
+        try:
+            subprocess.check_call([pip_executable, "install", "PyQt5", "PyQtWebEngine"])
+        except subprocess.CalledProcessError as e2:
+            print("Error installing PyQt5 and PyQtWebEngine individually:", e2)
+            sys.exit(1)
+
 
 def create_windows_wrapper(install_dir, venv_path):
     """Create a batch file wrapper and optionally a desktop shortcut."""

@@ -11,6 +11,8 @@ Improved Quran Browser with:
 
 import os
 import sys
+import csv
+import json
 import logging
 from datetime import datetime
 
@@ -18,7 +20,7 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import QUrl, QSize, Qt, QSettings, QTimer
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtCore import QStandardPaths, QSettings
-from search import QuranSearch  
+from search import QuranSearch
 
 import sqlite3
 from pathlib import Path
@@ -35,7 +37,7 @@ class NotesManager:
         app_data_path.mkdir(parents=True, exist_ok=True)
         self.db_path = app_data_path / "quran_notes.db"
         self._init_db()
-    
+
     def _init_db(self):
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute("""
@@ -48,18 +50,25 @@ class NotesManager:
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_surah_ayah ON notes (surah, ayah)")
-    
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS courses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    items TEXT NOT NULL -- JSON-encoded list of items
+                )
+            """)
+
     def get_notes(self, surah, ayah):
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.execute("""
-                SELECT id, content, created 
-                FROM notes 
+                SELECT id, content, created
+                FROM notes
                 WHERE surah=? AND ayah=?
                 ORDER BY created DESC
             """, (surah, ayah))
-            return [{"id": row[0], "content": row[1], "created": row[2]} 
+            return [{"id": row[0], "content": row[1], "created": row[2]}
                     for row in cursor.fetchall()]
-    
+
     def add_note(self, surah, ayah, content):
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.execute("""
@@ -67,22 +76,133 @@ class NotesManager:
                 VALUES (?, ?, ?)
             """, (surah, ayah, content))
             return cursor.lastrowid
-    
+
     def update_note(self, note_id, new_content):
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute("""
-                UPDATE notes 
+                UPDATE notes
                 SET content = ?, created = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (new_content, note_id))
-    
+
     def delete_note(self, note_id):
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
-    
+
     def delete_all_notes(self, surah, ayah):
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute("DELETE FROM notes WHERE surah=? AND ayah=?", (surah, ayah))
+
+    def export_to_csv(self, file_path):
+        """Exports all notes to a CSV file."""
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.execute("""
+                    SELECT surah, ayah, content, created
+                    FROM notes
+                    ORDER BY surah, ayah, created
+                """)
+                notes = cursor.fetchall()
+
+            with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['Surah', 'Ayah', 'Content', 'Created'])
+                writer.writerows(notes)
+            return True
+        except Exception as e:
+            logging.error(f"Export error: {e}")
+            raise
+
+    def import_from_csv(self, file_path):
+        """Imports notes from a CSV file, skipping duplicates."""
+        imported = 0
+        duplicates = 0
+        errors = 0
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                header = next(reader, None)
+                if header != ['Surah', 'Ayah', 'Content', 'Created']:
+                    raise ValueError("Invalid CSV header. Expected: Surah, Ayah, Content, Created")
+
+                for row in reader:
+                    if len(row) < 4:
+                        errors += 1
+                        continue
+                    try:
+                        surah = int(row[0])
+                        ayah = int(row[1])
+                        content = row[2].strip()
+                        # created is ignored, using current timestamp
+                    except (ValueError, IndexError) as e:
+                        errors += 1
+                        continue
+
+                    if self.note_exists(surah, ayah, content):
+                        duplicates += 1
+                    else:
+                        self.add_note(surah, ayah, content)
+                        imported += 1
+            return (imported, duplicates, errors)
+        except Exception as e:
+            logging.error(f"Import error: {e}")
+            raise
+
+    def note_exists(self, surah, ayah, content):
+        """Checks if a note with the same surah, ayah, and content exists."""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT COUNT(*)
+                FROM notes
+                WHERE surah=? AND ayah=? AND content=?
+            """, (surah, ayah, content))
+            return cursor.fetchone()[0] > 0
+        
+    def save_course(self, course_id, title, items):
+        items_json = json.dumps(items)
+        with sqlite3.connect(str(self.db_path)) as conn:
+            if course_id:
+                conn.execute("UPDATE courses SET title = ?, items = ? WHERE id = ?", (title, items_json, course_id))
+                return course_id
+            else:
+                cursor = conn.execute("INSERT INTO courses (title, items) VALUES (?, ?)", (title, items_json))
+                return cursor.lastrowid
+
+    def delete_course(self, course_id):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("DELETE FROM courses WHERE id = ?", (course_id,))
+
+    def get_new_course(self):
+        return None, {"title": "", "items": []}
+
+    def get_previous_course(self, current_id):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            if current_id is None:
+                # Return the last (most recent) course
+                cursor = conn.execute("SELECT id, title, items FROM courses ORDER BY id DESC LIMIT 1")
+            else:
+                cursor = conn.execute(
+                    "SELECT id, title, items FROM courses WHERE id < ? ORDER BY id DESC LIMIT 1",
+                    (current_id,))
+            row = cursor.fetchone()
+            if row:
+                return row[0], {"title": row[1], "items": json.loads(row[2])}
+        return self.get_new_course()
+
+
+    def get_next_course(self, current_id):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            if current_id is None:
+                # Return the first (oldest) course
+                cursor = conn.execute("SELECT id, title, items FROM courses ORDER BY id ASC LIMIT 1")
+            else:
+                cursor = conn.execute(
+                    "SELECT id, title, items FROM courses WHERE id > ? ORDER BY id ASC LIMIT 1",
+                    (current_id,))
+            row = cursor.fetchone()
+            if row:
+                return row[0], {"title": row[1], "items": json.loads(row[2])}
+        return self.get_new_course()
 
 
 
@@ -107,7 +227,7 @@ def get_audio_directory():
     # Build the config file path (hidden file in the user's home directory)
     config_file = os.path.join(os.path.expanduser("~"), ".quran_audio.ini")
     settings = QSettings(config_file, QSettings.IniFormat)
-    
+
     # Check if the AudioDirectory key exists; if not, set it to the default.
     if not settings.contains("AudioDirectory"):
         default_dir = get_default_audio_directory()
@@ -133,15 +253,15 @@ class QuranListModel(QtCore.QAbstractListModel):
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid() or index.row() >= len(self.results):
             return None
-            
+
         result = self.results[index.row()]
-        
+
         if role == Qt.DisplayRole:
             return result.get('text_uthmani', '')
         elif role == Qt.UserRole:
             return result
         return None
-    
+
     def rowCount(self, parent=QtCore.QModelIndex()):
         return self._displayed_results
 
@@ -166,12 +286,12 @@ class QuranListModel(QtCore.QAbstractListModel):
         remaining = len(self.results) - self._displayed_results
         if remaining > 0:
             batch_size = min(50, remaining)
-            self.beginInsertRows(QtCore.QModelIndex(), 
-                               self._displayed_results, 
+            self.beginInsertRows(QtCore.QModelIndex(),
+                               self._displayed_results,
                                self._displayed_results + batch_size - 1)
             self._displayed_results += batch_size
             self.endInsertRows()
-            
+
             if self._displayed_results < len(self.results):
                 QtCore.QTimer.singleShot(50, self.load_remaining_results)
             else:
@@ -247,11 +367,11 @@ class SearchLineEdit(QtWidgets.QLineEdit):
             # Add to beginning and enforce max limit
             self.history.insert(0, query)
             self.history = self.history[:self.history_max]
-            
+
             # Persist to QSettings
             settings = QtCore.QSettings("MOSAID", "QuranSearch")
             settings.setValue("searchHistory", self.history)
-            
+
             self.update_history_list()
 
     def update_history_list(self):
@@ -294,7 +414,7 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         self.version = version
         self.query = ""
         self.highlight_color = "#4CAF5050"
-        
+
     def update_version(self, version):
         self.version = version
         if self.parent():
@@ -312,11 +432,11 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         text_option.setAlignment(Qt.AlignRight)
         doc.setDefaultTextOption(text_option)
         doc.setTextWidth(option.rect.width() - 20)
-        
+
         if option.state & QtWidgets.QStyle.State_Selected:
             painter.fillRect(option.rect, option.palette.highlight())
             doc.setDefaultStyleSheet(f"body {{ color: {option.palette.highlightedText().color().name()}; }}")
-        
+
         painter.translate(option.rect.topLeft())
         doc.drawContents(painter)
         painter.restore()
@@ -324,7 +444,7 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
     def _format_text(self, result, version):
         if not result:  # Add null check
             return ""
-        
+
         text = result.get(f"text_{version}", "")
         return f"""
             <div dir="rtl" style="text-align:left;">
@@ -353,12 +473,12 @@ class DetailView(QtWidgets.QWidget):
         super().__init__(parent)
         self.notes_widget = NotesWidget()
         self.initUI()
-        
-    
+
+
     def initUI(self):
         # Split view
         splitter = QtWidgets.QSplitter(Qt.Vertical)
-        
+
         # Context View
         context_widget = QtWidgets.QWidget()
         context_layout = QtWidgets.QVBoxLayout(context_widget)
@@ -366,39 +486,39 @@ class DetailView(QtWidgets.QWidget):
         self.text_browser = QtWidgets.QTextBrowser()
         context_layout.addWidget(self.back_button)
         context_layout.addWidget(self.text_browser)
-        
+
         # Add widgets to splitter
         splitter.addWidget(context_widget)
         splitter.addWidget(self.notes_widget)
         splitter.setSizes([250, 350])  # Initial sizes
-        
+
         # Main layout
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(splitter)
-        
+
         # Connections
         self.back_button.clicked.connect(self.backRequested.emit)
-    
+
     def display_ayah(self, result, search_engine, version, is_dark_theme):
         verses = search_engine.get_ayah_with_context(result['surah'], result['ayah'])
         html = []
-        
+
         # Set colors based on theme
         text_color = "#000000" if is_dark_theme else "#000000"
         link_color = "#90CAF9" if is_dark_theme else "#1565C0"
         bg_color = self.palette().window().color().name()
-        
+
         for verse in verses:
             text = verse.get(f'text_{version}', "")
             current_class = "current-ayah" if verse['ayah'] == result['ayah'] else ""
             html.append(f"""
             <div class="verse {current_class}" dir="rtl" style="text-align:left;">
-                <div style="font-family: 'Amiri'; 
-                            font-size: 16pt; 
+                <div style="font-family: 'Amiri';
+                            font-size: 16pt;
                             margin: 5px;
                             color: {text_color};">
                     {text}
-                    <span style="color: {link_color}; 
+                    <span style="color: {link_color};
                                 font-size: 14pt;
                                 text-decoration: none;">
                         ({verse.get('surah', '')}-{verse.get('chapter', '')} {verse.get('ayah', '')})
@@ -406,7 +526,7 @@ class DetailView(QtWidgets.QWidget):
                 </div>
             </div>
             """)
-        
+
         self.text_browser.setHtml(f"""
         <html>
             <style>
@@ -422,35 +542,51 @@ class DetailView(QtWidgets.QWidget):
             {''.join(html)}
         </html>
         """)
-        
+
         # Update notes widget
         self.notes_widget.set_ayah(result['surah'], result['ayah'])
 
 class NotesWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.statusBar = lambda: self.window().statusBar()  
+        self.statusBar = lambda: self.window().statusBar()
         self.notes_manager = NotesManager()
         self.current_surah = None
         self.current_ayah = None
         self.current_note_id = None
+        self.search_engine = QuranSearch()
         self.init_ui()
-    
+
     def init_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
-        
+
         # Toolbar
         toolbar = QtWidgets.QToolBar()
+        toolbar_layout = QtWidgets.QHBoxLayout()
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_layout.setSpacing(10)
+
         self.new_button = QtWidgets.QAction(QtGui.QIcon.fromTheme("document-new"), "New", self)
         self.save_button = QtWidgets.QAction(QtGui.QIcon.fromTheme("document-save"), "Save", self)
         self.delete_button = QtWidgets.QAction(QtGui.QIcon.fromTheme("edit-delete"), "Delete", self)
         toolbar.addAction(self.new_button)
         toolbar.addAction(self.save_button)
         toolbar.addAction(self.delete_button)
-        
+
+        # Spacer to push the label to the right
+        spacer = QtWidgets.QWidget()
+        spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        toolbar.addWidget(spacer)
+
+        # Add a small label for the notes list
+        self.notes_label = QtWidgets.QLabel("تدبر الآية ")
+        self.notes_label.setStyleSheet("font-size: 10pt; font-weight: bold; margin-right: 10px;")
+        self.notes_label.setAlignment(QtCore.Qt.AlignVCenter)  # Vertically center the label
+        toolbar.addWidget(self.notes_label)
+
         # Split view for notes list and editor
         splitter = QtWidgets.QSplitter(Qt.Horizontal)
-        
+
         # Notes list
         self.notes_list = QtWidgets.QListWidget()
         self.notes_list.itemSelectionChanged.connect(self.on_note_selected)
@@ -459,7 +595,7 @@ class NotesWidget(QtWidgets.QWidget):
         list_font = self.notes_list.font()
         list_font.setPointSize(12)  # Increased from default 9-10
         self.notes_list.setFont(list_font)
-        
+
         # Optional: Add padding and set minimum row height
         self.notes_list.setStyleSheet("""
             QListWidget::item {
@@ -468,41 +604,43 @@ class NotesWidget(QtWidgets.QWidget):
             }
         """)
         self.notes_list.setMinimumHeight(100)
-        
+
         # Editor
         self.editor = QtWidgets.QTextEdit()
         self.editor.setPlaceholderText("...أكتب هنا")
         editor_font = self.notes_list.font()
         editor_font.setPointSize(12)  # Increased from default 9-10
         self.editor.setFont(editor_font)
-        
+
         splitter.addWidget(self.notes_list)
         splitter.addWidget(self.editor)
 
         # Set initial split ratio (1:3 ratio)
         splitter.setSizes([self.height()//4, self.height()//4*3])
-        
+
         # Make editor resizing prioritized
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
-        
+
         # Ensure proper initial layout
         QtCore.QTimer.singleShot(100, lambda: splitter.setSizes([200, 300]))
-        
+
         layout.addWidget(toolbar)
         layout.addWidget(splitter)
-        
+
         # Connections
         self.new_button.triggered.connect(self.new_note)
         self.save_button.triggered.connect(self.save_note)
         self.delete_button.triggered.connect(self.delete_note)
-    
+
     def set_ayah(self, surah, ayah):
         self.current_surah = surah
         self.current_ayah = ayah
         self.current_note_id = None
+        chapter = self.search_engine.get_chapter_name(self.current_surah)
+        self.notes_label.setText(f"تدبر الآية {self.current_ayah} من سورة {chapter}")
         self.load_notes()
-    
+
     def load_notes(self):
         self.notes_list.clear()
         notes = self.notes_manager.get_notes(self.current_surah, self.current_ayah)
@@ -511,46 +649,46 @@ class NotesWidget(QtWidgets.QWidget):
             preview = note['content'][:80]
             if len(note['content']) > 80:
                 preview += "..."
-                
+
             item = QtWidgets.QListWidgetItem(preview)
             item.setData(Qt.UserRole, note)
             self.notes_list.addItem(item)
         self.editor.clear()
-    
+
     def on_note_selected(self):
         selected = self.notes_list.currentItem()
         if selected:
             note = selected.data(Qt.UserRole)
             self.current_note_id = note['id']
             self.editor.setPlainText(note['content'])
-    
+
     def new_note(self):
         self.notes_list.clearSelection()
         self.current_note_id = None
         self.editor.clear()
         self.editor.setFocus()
-    
+
     def save_note(self):
         if not (self.current_surah and self.current_ayah):
             return
-        
+
         content = self.editor.toPlainText().strip()
         if not content:
             return
-        
+
         if self.current_note_id:
             self.notes_manager.update_note(self.current_note_id, content)
         else:
             self.notes_manager.add_note(self.current_surah, self.current_ayah, content)
-        
+
         self.load_notes()
-    
+
     def delete_note(self):
         if self.current_note_id:
             # Get note preview text
             selected_item = self.notes_list.currentItem()
             note_preview = selected_item.text() if selected_item else "this note"
-            
+
             # Create confirmation dialog
             msg = QtWidgets.QMessageBox(self)
             msg.setIcon(QtWidgets.QMessageBox.Warning)
@@ -558,26 +696,255 @@ class NotesWidget(QtWidgets.QWidget):
             msg.setText(f"هل تريد حقا إزالة هذا التسجيل")
             msg.setInformativeText(note_preview)
             msg.setStandardButtons(
-                QtWidgets.QMessageBox.Yes | 
+                QtWidgets.QMessageBox.Yes |
                 QtWidgets.QMessageBox.No
             )
             msg.setDefaultButton(QtWidgets.QMessageBox.No)
-            
+
             # Add keyboard shortcuts
             msg.button(QtWidgets.QMessageBox.Yes).setShortcut(QtGui.QKeySequence("Y"))
             msg.button(QtWidgets.QMessageBox.No).setShortcut(QtGui.QKeySequence("N"))
-            
+
             # Show dialog and handle response
             response = msg.exec_()
             if response == QtWidgets.QMessageBox.Yes:
                 self.notes_manager.delete_note(self.current_note_id)
                 self.load_notes()
                 self.statusBar().showMessage("Note deleted successfully", 2000)
-        
+
     def delete_all_notes(self):
         if self.current_surah and self.current_ayah:
             self.notes_manager.delete_all_notes(self.current_surah, self.current_ayah)
             self.load_notes()
+
+
+class AyahSelectorDialog(QtWidgets.QDialog):
+    play_requested = QtCore.pyqtSignal(int, int, int)
+    search_requested = QtCore.pyqtSignal(str)
+
+    def __init__(self, notes_manager, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Ayah Selector")
+        self.resize(250, 350)  # Set initial size but allow resizing
+        self.notes_manager = notes_manager
+        self.current_course_id = None
+        self.init_ui()
+        # Connect the itemChanged signal so edits are handled properly
+        self.model.itemChanged.connect(self.on_item_changed)
+        self.list_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
+        self.load_new_course()
+
+        # Add shortcuts for navigation (left/right arrow keys)
+        self.shortcut_prev = QtWidgets.QShortcut(QtGui.QKeySequence("Left"), self)
+        self.shortcut_prev.activated.connect(self.load_previous_course_and_focus)
+        self.shortcut_next = QtWidgets.QShortcut(QtGui.QKeySequence("Right"), self)
+        self.shortcut_next.activated.connect(self.load_next_course_and_focus)
+
+    def init_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+
+        # Top input field with navigation buttons
+        self.course_input = QtWidgets.QLineEdit()
+        self.prev_button = QtWidgets.QPushButton("<-")
+        self.next_button = QtWidgets.QPushButton("->")
+        # Make navigation buttons as small as possible
+        self.prev_button.setFixedSize(25, 25)
+        self.next_button.setFixedSize(25, 25)
+        nav_layout = QtWidgets.QHBoxLayout()
+        nav_layout.addWidget(self.prev_button)
+        nav_layout.addWidget(self.course_input)
+        nav_layout.addWidget(self.next_button)
+        layout.addLayout(nav_layout)
+
+        # List view and model
+        self.model = QtGui.QStandardItemModel()
+        self.list_view = QtWidgets.QListView()
+        self.list_view.setModel(self.model)
+        self.list_view.setEditTriggers(
+            QtWidgets.QAbstractItemView.DoubleClicked | QtWidgets.QAbstractItemView.EditKeyPressed
+        )
+        self.list_view.installEventFilter(self)
+        layout.addWidget(self.list_view)
+
+        # Status label (for validation and course messages)
+        self.status_label = QtWidgets.QLabel("")
+        layout.addWidget(self.status_label)
+
+        # Custom button layout: Save on the left, OK on the right
+        button_layout = QtWidgets.QHBoxLayout()
+        self.save_button = QtWidgets.QPushButton("Save")
+        ok_button = QtWidgets.QPushButton("OK")
+        button_layout.addWidget(self.save_button)
+        button_layout.addStretch()  # Pushes OK button to the right
+        button_layout.addWidget(ok_button)
+        layout.addLayout(button_layout)
+        # Connect buttons:
+        self.save_button.clicked.connect(self.save_course)
+        ok_button.clicked.connect(self.accept)
+
+        # Navigation button connections using helper functions for focus
+        self.prev_button.clicked.connect(self.load_previous_course_and_focus)
+        self.next_button.clicked.connect(self.load_next_course_and_focus)
+
+    def load_previous_course_and_focus(self):
+        self.load_previous_course()
+        self.list_view.setFocus()
+
+    def load_next_course_and_focus(self):
+        self.load_next_course()
+        self.list_view.setFocus()
+
+    def update_status(self, message):
+        self.status_label.setText(message)
+
+    def add_empty_item(self):
+        """Append an empty, editable item to the model."""
+        empty_item = QtGui.QStandardItem("")
+        empty_item.setEditable(True)
+        self.model.appendRow(empty_item)
+
+    def ensure_extra_row(self):
+        """Ensure there is always an extra empty row at the bottom."""
+        if self.model.rowCount() == 0:
+            self.add_empty_item()
+        else:
+            last_item = self.model.item(self.model.rowCount() - 1)
+            if last_item.text().strip() != "":
+                self.add_empty_item()
+
+    def remove_item(self, row):
+        """Remove the item at the specified row and ensure an extra row exists."""
+        self.model.blockSignals(True)
+        self.model.removeRow(row)
+        self.model.blockSignals(False)
+        self.ensure_extra_row()
+
+    def on_selection_changed(self, selected, deselected):
+        # For newly selected items, update search items' text to include the query.
+        for index in selected.indexes():
+            item = self.model.itemFromIndex(index)
+            data = item.data(Qt.UserRole)
+            if data and data.get("type") == "search":
+                new_text = "بحث عن " + data.get("query", "")
+                self.model.blockSignals(True)
+                item.setText(new_text)
+                self.model.blockSignals(False)
+        # For items that are no longer selected, revert search items' text back to "بحث".
+        for index in deselected.indexes():
+            item = self.model.itemFromIndex(index)
+            data = item.data(Qt.UserRole)
+            if data and data.get("type") == "search":
+                self.model.blockSignals(True)
+                item.setText("بحث")
+                self.model.blockSignals(False)
+
+    def on_item_changed(self, item):
+        text = item.text().strip()
+        row = self.model.indexFromItem(item).row()
+
+        # If text is empty, remove it
+        if text == "":
+            QtCore.QTimer.singleShot(0, lambda r=row: self.remove_item(r))
+            return
+
+        # Validate input
+        parts = text.split()
+        if parts[0].lower() == "a":
+            if len(parts) not in (3, 4):
+                self.update_status("Invalid format. Use 'a surah ayah' or 'a surah start end'.")
+                return
+            try:
+                surah = int(parts[1])
+                start = int(parts[2])
+                end = int(parts[3]) if len(parts) == 4 else start
+                formatted = f"Surah {surah}: Ayah {start}-{end}" if start != end else f"Surah {surah}: Ayah {start}"
+                item.setText(formatted)
+                item.setData({'type': 'ayah', 'surah': surah, 'start': start, 'end': end}, Qt.UserRole)
+                self.update_status("Valid input.")
+            except ValueError:
+                self.update_status("Invalid ayah numbers.")
+        elif parts[0].lower() == "s":
+            item.setText("بحث")
+            item.setData({'type': 'search', 'query': " ".join(parts[1:])}, Qt.UserRole)
+            self.update_status("Valid input.")
+        else:
+            self.update_status("Invalid input. Use 'a' or 's' as prefixes.")
+
+        self.ensure_extra_row()
+
+    def eventFilter(self, source, event):
+        if source is self.list_view and event.type() == QtCore.QEvent.KeyPress:
+            if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+                index = self.list_view.currentIndex()
+                if index.isValid():
+                    item = self.model.itemFromIndex(index)
+                    if not item.text().strip():
+                        self.list_view.edit(index)
+                        return True
+                    data = item.data(Qt.UserRole)
+                    if data:
+                        if data['type'] == 'ayah':
+                            self.play_requested.emit(data['surah'], data['start'], data['end'])
+                        elif data['type'] == 'search':
+                            self.search_requested.emit(data['query'])
+                return True
+        return super().eventFilter(source, event)
+
+    def load_new_course(self):
+        self.current_course_id, course = self.notes_manager.get_new_course()
+        self.load_course(course)
+
+    def load_previous_course(self):
+        self.current_course_id, course = self.notes_manager.get_previous_course(self.current_course_id)
+        self.load_course(course)
+
+    def load_next_course(self):
+        self.current_course_id, course = self.notes_manager.get_next_course(self.current_course_id)
+        self.load_course(course)
+
+    def load_course(self, course):
+        self.model.clear()
+        self.course_input.setText(course['title'])
+        for item_str in course['items']:
+            try:
+                # Try to parse the saved JSON data.
+                item_data = json.loads(item_str)
+                text = item_data.get("text", "")
+                user_data = item_data.get("user_data", None)
+            except Exception:
+                # Fallback: treat it as plain text.
+                text = item_str
+                user_data = None
+            list_item = QtGui.QStandardItem(text)
+            list_item.setEditable(True)
+            if user_data is not None:
+                list_item.setData(user_data, Qt.UserRole)
+            self.model.appendRow(list_item)
+        self.add_empty_item()
+        self.update_status(f"Loaded course ID: {self.current_course_id}")
+
+    def save_course(self):
+        title = self.course_input.text().strip() or f"درس رقم {self.current_course_id or 'NEW'}"
+        items = []
+        for row in range(self.model.rowCount()):
+            item = self.model.item(row)
+            if item.text().strip():
+                user_data = item.data(Qt.UserRole)
+                if user_data is not None:
+                    items.append(json.dumps({"text": item.text(), "user_data": user_data}))
+                else:
+                    items.append(json.dumps({"text": item.text()}))
+        if items:
+            new_id = self.notes_manager.save_course(self.current_course_id, title, items)
+            self.current_course_id = new_id
+            self.update_status("Course saved.")
+        else:
+            self.notes_manager.delete_course(self.current_course_id)
+            self.update_status("Course deleted (empty list).")
+
+    def save_and_close(self):
+        self.save_course()
+        self.accept()
 
 
 # =============================================================================
@@ -589,13 +956,19 @@ class QuranBrowser(QtWidgets.QMainWindow):
         icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
         self.setWindowIcon(QtGui.QIcon(icon_path))
         self.search_engine = QuranSearch()
-        self.current_detail_result = None  
+        self.ayah_selector = None
+        self.current_detail_result = None
+        self._status_msg = ""
         self.current_surah = 0
         self.current_start_ayah = 0
         self.sequence_files = []
         self.current_sequence_index = 0
         self.playing_one = False
         self.playing_context = 0
+        self.playing_range = 0
+        self.playing_range_max = 0
+        self.results_count_int = 0
+        self.playing_ayah_range = False
 
         self.settings = QtCore.QSettings("MOSAID", "QuranSearch")
         self.init_ui()
@@ -689,10 +1062,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.status_bar.addWidget(center_label, 1)
 
         # Right widget: shortcuts info (no stretch)
-        shortcuts = QtWidgets.QLabel("Help: Ctrl+F")
+        shortcuts = QtWidgets.QLabel("Help: Ctrl+H")
         shortcuts.setAlignment(QtCore.Qt.AlignRight)
         self.status_bar.addWidget(shortcuts, 0)
-
 
         # Set the central widget.
         self.setCentralWidget(central)
@@ -709,6 +1081,19 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.detail_view.backRequested.connect(self.show_results_view)
         self.results_view.doubleClicked.connect(self.show_detail_view)
 
+
+    @property
+    def status_msg(self):
+        return self._status_msg
+
+    @status_msg.setter
+    def status_msg(self, value):
+        self._status_msg = value
+        self.updatePermanentStatus()
+
+    def updatePermanentStatus(self):
+        self.result_count.setText(f"{self.results_count_int} نتائج، {self._status_msg}")
+
     def setup_shortcuts(self):
         QtWidgets.QShortcut(QtGui.QKeySequence("Space"), self, activated=self.handle_space)
         QtWidgets.QShortcut(QtGui.QKeySequence("Escape"), self, activated=self.toggle_version)
@@ -716,7 +1101,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, activated=self.input_focus)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+D"), self, activated=self.toggle_theme)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+P"), self, activated=self.handle_ctrlp)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+S"), self, activated=self.stop_playback)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+R"), self, activated=self.handle_ctrlr)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+S"), self, activated=self.handle_ctrls)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+W"), self, activated=self.handle_ctrlw)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+A"), self.results_view, activated=self.play_current_surah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+B"), self, activated=self.backto_current_surah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+H"), self, activated=self.show_help_dialog)
@@ -724,6 +1111,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+K"), self, activated=self.load_surah_from_current_playback)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+N"), self, activated=self.new_note)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Delete"), self, activated=self.delete_note)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+A"), self, activated=self.show_ayah_selector)
+
 
     def new_note(self):
         if self.detail_view.isVisible():
@@ -734,34 +1123,133 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.detail_view.notes_widget.delete_note()
 
     def showMessage(self, message, timeout=7000):
-        # Save the current stylesheet.
+        # Save the current style
         original_style = self.status_bar.styleSheet()
-        # Set the error background.
+        # Set an error style (red background)
         self.status_bar.setStyleSheet("QStatusBar { background-color: red; }")
+        # Show the temporary message
         self.status_bar.showMessage(message, timeout)
-        # After 'timeout' milliseconds, revert to the original style.
-        QtCore.QTimer.singleShot(timeout, lambda: self.status_bar.setStyleSheet(original_style))
+        # After timeout, reset the style and restore permanent message
+        self.status_bar.setStyleSheet(original_style)
 
+    def show_ayah_selector(self):
+        if not self.ayah_selector:
+            self.ayah_selector = AyahSelectorDialog(self.notes_manager, self)
+            self.ayah_selector.play_requested.connect(self.play_ayah_range)
+            self.ayah_selector.search_requested.connect(self.handle_course_search)
+        self.ayah_selector.show()
+
+    def handle_course_search(self, query):
+        self.search_input.setText(query)
+        self.search()
+
+    def play_ayah_range(self, surah, start, end):
+        #self.status_bar.showMessage(f"{surah}:{start}--{end}", 5000)
+        try:
+            results = self.search_engine.search_by_surah_ayah(surah, start, end)
+            if results:
+                self.model.updateResults(results)
+                self.current_surah = surah
+                self.current_start_ayah = start
+                self.sequence_files = []
+
+                # Build file list
+                audio_dir = get_audio_directory()
+                for ayah in range(start, end+1):
+                    file_path = os.path.join(audio_dir, f"{surah:03d}{ayah:03d}.mp3")
+                    if os.path.exists(file_path):
+                        self.sequence_files.append(os.path.abspath(file_path))
+
+                if self.sequence_files:
+                    self.current_sequence_index = 0
+                    self.playing_ayah_range = True
+                    self.play_next_file()
+                else:
+                    self.status_bar.showMessage("No audio files found for selection", 5000)
+        except Exception as e:
+            logging.error(f"Error playing ayah range: {str(e)}")
+            self.status_bar.showMessage("Error playing selection", 5000)
 
     def setup_menu(self):
         menu = self.menuBar().addMenu("&Menu")
         self.theme_action = QtWidgets.QAction("Dark Mode", self, checkable=True)
         self.theme_action.toggled.connect(self.update_theme_style)
         menu.addAction(self.theme_action)
-        about_action = QtWidgets.QAction("About", self)
-        about_action.triggered.connect(self.about_dialog)
-        menu.addAction(about_action)
+
         # New action: Set Audio Directory.
         audio_dir_action = QtWidgets.QAction("Set Audio Directory", self)
         audio_dir_action.triggered.connect(self.choose_audio_directory)
         menu.addAction(audio_dir_action)
-        # Add Help action with Ctrl+H shortcut.
+        # Add Export/Import actions
+        export_action = QtWidgets.QAction("Export Notes", self)
+        export_action.triggered.connect(self.export_notes)
+        menu.addAction(export_action)
+        import_action = QtWidgets.QAction("Import Notes", self)
+        import_action.triggered.connect(self.import_notes)
+        menu.addAction(import_action)
+
+        # Add About action
+        about_action = QtWidgets.QAction("About", self)
+        about_action.triggered.connect(self.about_dialog)
+        menu.addAction(about_action)
+        # Add Help action
         help_action = QtWidgets.QAction("Help", self)
         help_action.triggered.connect(self.show_help_dialog)
         menu.addAction(help_action)
+        # Exit action
         exit_action = QtWidgets.QAction("Exit", self)
         exit_action.triggered.connect(self.close)
         menu.addAction(exit_action)
+
+
+    def export_notes(self):
+        """Handles exporting notes to a CSV file with suggested filename."""
+        # Generate default filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        default_name = f"quran_notes_{timestamp}.csv"
+
+        # Get default documents directory
+        docs_dir = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Export Notes",
+            os.path.join(docs_dir, default_name),  # Suggested path/name
+            "CSV Files (*.csv)",
+            options=QtWidgets.QFileDialog.DontConfirmOverwrite
+        )
+
+        if file_path:
+            # Ensure .csv extension
+            if not file_path.lower().endswith('.csv'):
+                file_path += '.csv'
+
+            try:
+                self.notes_manager.export_to_csv(file_path)
+                self.status_bar.showMessage(f"Notes exported to {file_path}", 5000)
+            except Exception as e:
+                self.showMessage(f"Export failed: {str(e)}", 5000)
+
+    def import_notes(self):
+        """Handles importing notes from a CSV file."""
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Import Notes", "", "CSV Files (*.csv)")
+        if file_path:
+            try:
+                imported, duplicates, errors = self.notes_manager.import_from_csv(file_path)
+                msg = f"Imported {imported} notes. Skipped {duplicates} duplicates. {errors} errors."
+                self.status_bar.showMessage(msg, 7000)
+
+                # Refresh notes display if detail view is visible
+                if self.detail_view.isVisible():
+                    self.detail_view.notes_widget.load_notes()
+            except ValueError as e:
+                self.showMessage(str(e), 7000)
+            except Exception as e:
+                self.showMessage(f"Import failed: {str(e)}", 7000)
+        if self.detail_view.isVisible():
+            self.detail_view.notes_widget.load_notes()
+
 
 
     def load_settings(self):
@@ -785,14 +1273,14 @@ class QuranBrowser(QtWidgets.QMainWindow):
         """
         # Get the current audio directory from the INI file.
         current_dir = get_audio_directory()
-        
+
         # Open a directory chooser dialog.
         chosen_dir = QtWidgets.QFileDialog.getExistingDirectory(
             self,
             "Select Audio Directory",
             current_dir
         )
-        
+
         # If the user selected a directory, update the INI file.
         if chosen_dir:
             config_file = os.path.join(os.path.expanduser("~"), ".quran_audio.ini")
@@ -896,7 +1384,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def search(self):
         if self.detail_view.isVisible():
             self.show_results_view()
-            
+
         query = self.search_input.text().strip()
         method = self.search_method_combo.currentText()
         if not query and method == "Text":
@@ -927,19 +1415,22 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
     def handle_search_results(self, results):
         self.model.updateResults(results)
-        self.result_count.setText(f"Found {len(results)} results")
+        self.results_count_int = len(results)
+        self.result_count.setText(f"Found {self.results_count_int} results")
         if results:
             self.results_view.setFocus()
         # Connect to the properly defined signal
         self.model.loading_complete.connect(self.finalize_results)
 
     def finalize_results(self):
-        self.result_count.setText(f"Found {len(self.model.results)} results.")
+        self.results_count_int = len(self.model.results)
+        self.result_count.setText(f"Found {self.results_count_int} results.")
         self.model.loading_complete.disconnect()  # Clean up connection
 
     def update_results(self, results, query):
         self.model.updateResults(results)
-        self.result_count.setText(f"Found {len(results)} results")
+        self.results_count_int = len(results)
+        self.result_count.setText(f"Found {self.results_count_int} results.")
         if results:
             self.results_view.setFocus()
 
@@ -968,19 +1459,61 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def handle_space(self):
         self.playing_one = True
         self.playing_context = 0
+        self.playing_range = 0
+        self.status_msg = ""
         self.play_current()
 
     def handle_ctrlp(self):
-        self.playing_context = 6
+        self.playing_context = 1
+        self.status_msg = "إستماع الى الأية وخمسة بعدها"
         self.play_current(count=6)
+
+    def handle_ctrlr(self):
+        method = self.search_method_combo.currentText()
+        if not method == "Surah FirstAyah LastAyah":
+            self.showMessage("Please select a range to repeat using 'Surah FirstAyah LastAyah' search method", 10000)
+            return
+        self.playing_range = 1
+        self.playing_range_max = self.results_count_int
+        self.play_current(count=self.playing_range_max)
+
+    def handle_ctrlw(self):
+        """Handle Ctrl+Z: Set search method to Surah and focus search input"""
+        try:
+            # Set search method to "Surah"
+            index = self.search_method_combo.findText("Surah", QtCore.Qt.MatchFixedString)
+            if index >= 0:
+                self.search_method_combo.setCurrentIndex(index)
+
+            # Focus and select all text in search input
+            self.search_input.setFocus()
+            self.search_input.selectAll()
+
+            # Optional: Trigger search if needed
+            # self.search()
+
+        except Exception as e:
+            logging.error(f"Error in handle_ctrlw: {str(e)}")
+            self.status_bar.showMessage("Error changing search mode", 3000)
+
+    def handle_ctrls(self):
+        if self.detail_view.isVisible():
+            notes_widget = self.detail_view.notes_widget
+            # Check if notes editor has focus
+            if notes_widget.editor.hasFocus():
+                notes_widget.save_note()
+                return
+        # Fallback to audio stop
+        self.status_msg = ""
+        self.stop_playback()
 
     def play_current(self, surah=None, ayah=None, count=1):
         """
         Play a single audio file or a sequence of files.
-        
+
         If surah and ayah are provided, they are used directly; otherwise,
         the currently selected verse in the results view is used.
-        
+
         If count == 1, play a single file.
         If count > 1, build a list of files and play them sequentially.
         Audio files are expected to be named with padded numbers (e.g., "001001.mp3").
@@ -1001,7 +1534,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         # Retrieve the audio directory from the INI file.
         audio_dir = get_audio_directory()
-        
+
         # Single-file playback:
         if count == 1:
             audio_file = os.path.join(audio_dir, f"{int(surah):03d}{int(ayah):03d}.mp3")
@@ -1017,7 +1550,6 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.current_surah = int(surah)
         self.current_start_ayah = int(ayah)
         self.sequence_files = []
-        
         # Build a list of files for 'count' files (starting from the provided ayah).
         for offset in range(count):
             current_ayah = self.current_start_ayah + offset
@@ -1044,13 +1576,15 @@ class QuranBrowser(QtWidgets.QMainWindow):
         When the current surah finishes, automatically load the next surah (or surah 1 if current is 114)
         and begin playback from ayah 1.
         """
-        if self.current_sequence_index < len(self.sequence_files):
+        maxx = len(self.sequence_files)
+        if self.current_sequence_index < maxx:
+            chapter = self.search_engine.get_chapter_name(self.current_surah)
+            self.status_msg = f"<span dir='rtl' style='text-align: right'> إستماع إلى سورة {chapter}  {self.current_sequence_index+1}/{maxx}</span>"
             # Continue playing the current surah.
             file_path = self.sequence_files[self.current_sequence_index]
             url = QUrl.fromLocalFile(file_path)
             self.player.setMedia(QMediaContent(url))
             self.player.play()
-            self.status_bar.showMessage("Playing: audio", 2000)
 
             # Calculate the current ayah being played.
             current_ayah = self.current_start_ayah + self.current_sequence_index
@@ -1066,7 +1600,17 @@ class QuranBrowser(QtWidgets.QMainWindow):
                     self.playing_context += 1
                 else:
                     self.playing_context = 0
-                    return
+                    self.status_msg = ""
+                return
+            if self.playing_range:
+                if self.playing_range <= self.playing_range_max:
+                    self.playing_range += 1
+                else:
+                    self.playing_range = 1
+                return
+            if self.playing_ayah_range:
+                self.playing_ayah_range = False
+                return
             # End of current surah reached: increment surah (wrap around if needed).
             if self.current_surah < 114:
                 self.current_surah += 1
@@ -1096,6 +1640,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 self.status_bar.showMessage(f"No audio files found for surah {self.current_surah}. Playback finished.", 2000)
                 self.sequence_files = []
                 self.current_sequence_index = 0
+                self.status_msg = ""
 
 
 
@@ -1258,118 +1803,70 @@ class QuranBrowser(QtWidgets.QMainWindow):
         )
 
     def show_help_dialog(self):
-        help_text = """
-        <html>
-        <body style="text-align: right; direction: rtl; margin: 10px; font-family: Arial; font-size: 12pt;">
-            <div style="margin-bottom: 20px;">
-                <h2 style="margin: 0 0 15px 0;">مساعدة بحث القرآن الكريم</h2>
-                <div style="margin-bottom: 15px;">:يتيح لك هذا التطبيق البحث في آيات القرآن الكريم وتشغيلها صوتياً. المميزات تشمل</div>
-                
-                <div style="margin-right: 20px; margin-bottom: 10px;">
-                    <b>اختيار السورة:</b> استخدم القائمة المنسدلة لاختيار سورة. ستظهر القائمة جميع آيات السورة المختارة.
-                </div>
-                
-                <div style="margin-right: 20px; margin-bottom: 10px;">
-                    <b>طرق البحث:</b> اختر بين
-                    <div style="margin-right: 40px; margin-top: 5px;">
-                        <div style="margin-bottom: 5px;"><b>بحث نصي:</b> اكتب كلمة/كلمات عربية للبحث في نص القرآن• </div>
-                        <div style="margin-bottom: 5px;"><span style="direction: ltr; unicode-bidi: embed;">\u202aEnter\u202c</span> <b>بحث السورة:</b> اكتب رقم السورة في حقل الإدخال ثم اضغط •</div>
-                        <div><span style="direction: ltr; unicode-bidi: embed;">\u202a2 255\u202c</span> أو <span style="direction: ltr; unicode-bidi: embed;">\u202a2 255 280\u202c</span> <b>السورة الآية الأولى الآية الأخيرة:</b> استخدم أرقام مثل •</div>
-                    </div>
-                </div>
-                
-                <div style="margin-right: 20px; margin-bottom: 10px;">
-                    <p style="text-align: right;">
-                        <span><b>سياق الآية:</b></span>
-                        <span> النقر المزدوج أو زر </span>
-<span style="direction: ltr; unicode-bidi: embed; display: inline-block; padding: 0 5px; font-weight: bold;">⏎</span>
-                        <span>على الآية المحددة يعرض سياقها؛ 5 آيات قبلها و5 بعدها بصيغة نصية قابلة للنسخ.</span>
-                    </p>
-                </div>
+        """Display comprehensive user manual from external HTML file"""
+        try:
+            # Get path to help file
+            base_dir = Path(__file__).parent
+            help_path = base_dir / "help" / "help_ar.html"
 
-                
-                <div style="margin-right: 20px; margin-bottom: 10px;">
-                    <b>تشغيل الصوت:</b> مع إمكانية التمرير التلقائي للآية الموالية ثم السورة الموالية
-                    <div style="margin-right: 40px; margin-top: 5px;">
-                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aSpace\u202c</span>:  تشغيل الآية المحددة فقط •</div>
-                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+P\u202c</span>: تشغيل الآية الحالية والخمس التالية فقط•</div>
-                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+S\u202c</span>: إيقاف التشغيل •</div>
-                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+A\u202c</span>: تشغيل السورة كاملة •</div>
-                        <div> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+B\u202c</span>: العودة إلى السورة التي تستمع إليها حاليا •</div>
-                    </div>
-                </div>
-                
-                <div style="margin-right: 20px; margin-bottom: 20px;">
-                    <b>اختصارات الواجهة:</b>
-                    <div style="margin-right: 40px; margin-top: 5px;">
-                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+F\u202c</span>: التركيز على حقل البحث •</div>
-                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+D\u202c</span>: التبديل بين الوضع الليلي والنهاري •</div>
-                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aBackspace\u202c</span>: العودة إلى قائمة النتائج •</div>
-                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aEscape\u202c</span>: التبديل بين الخط العثماني والمبسط •</div>
-                        <div style="margin-bottom: 5px;"> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+H\u202c</span>: عرض هذه النافذة •</div>
-                        <div> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+K\u202c</span>:   العودة إلى سورة البحث الحالية(في القائمة) •</div>
-                        <div> <span style="direction: ltr; unicode-bidi: embed;">\u202aCtrl+J\u202c</span>:   عرض السورة من خلال الأية المحددة •</div>
+            # Read HTML content
+            with open(help_path, "r", encoding="utf-8") as f:
+                help_content = f.read()
+        except Exception as e:
+            help_content = f"<h2>Error loading help file</h2><p>{str(e)}</p>"
 
-                    </div>
-                </div>
-                <div style="margin-right: 20px; margin-top: 15px;">
-                    <b>مجلد الصوت:</b> استخدم عنصر القائمة 'تعيين مجلد الصوت' لتغيير مكان ملفات الصوت. يجب أن تكون    
-                    <p style="margin-right: 40px">
-                    زر موقعنا لمعرفة كيفية الحصول عليها . <span style="direction: ltr; unicode-bidi: embed;">\u202a002001.mp3\u202c</span>  الملفات بأسماء مثل 
-                    </p>
-                </div>
-                <div style="text-align: center; margin-top: 20px;">
-                    للمساعدة الإضافية، يرجى زيارة موقعنا:<br><br>
-                    <a href="https://mosaid.xyz/quran-search" style="direction: ltr; unicode-bidi: embed;">\u202ahttps://mosaid.xyz\u202c</a>
-                    <br><br>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-
-        # Create a custom dialog.
+        # Create dialog
         dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle("مساعدة")
+        dialog.setWindowTitle("دليل المستخدم - Quran Search")
+        #dialog.setMinimumSize(1000, 700)
         dialog.setModal(True)
         dialog.setFixedSize(800, 400)
 
-        # Set up a vertical layout.
+        # Main layout
         layout = QtWidgets.QVBoxLayout(dialog)
 
-        # Create a QScrollArea to make the content scrollable.
-        scroll_area = QtWidgets.QScrollArea(dialog)
-        scroll_area.setWidgetResizable(True)  # Enable resizing of the content within the scroll area.
+        # Create scroll area
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
 
-        # Create a container widget for the help text.
-        content_widget = QtWidgets.QWidget()
-        content_layout = QtWidgets.QVBoxLayout(content_widget)
+        # Create content widget
+        content = QtWidgets.QWidget()
+        scroll.setWidget(content)
 
-        # Use a QLabel to display the help text.
-        label = QtWidgets.QLabel(help_text, content_widget)
-        label.setWordWrap(True)
-        label.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
-        label.setOpenExternalLinks(True)
-        content_layout.addWidget(label)
+        # Content layout
+        content_layout = QtWidgets.QVBoxLayout(content)
 
+        # HTML viewer
+        html_label = QtWidgets.QLabel()
+        html_label.setTextFormat(QtCore.Qt.RichText)
+        html_label.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
+        html_label.setOpenExternalLinks(True)
+        html_label.setText(help_content)
 
+        # Add elements to layout
+        content_layout.addWidget(html_label)
+        layout.addWidget(scroll)
 
-        # Set the container widget as the scroll area's widget.
-        scroll_area.setWidget(content_widget)
+        # Add close button
+        btn_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok)
+        btn_box.accepted.connect(dialog.accept)
+        layout.addWidget(btn_box)
 
-        # Add the scroll area to the dialog's layout.
-        layout.addWidget(scroll_area)
-
-        # Add an OK button.
-        button_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok)
-        button_box.accepted.connect(dialog.accept)
-        layout.addWidget(button_box)
-
-        # Center the dialog relative to the parent window.
-        parent_geom = self.frameGeometry()
-        dialog_geom = dialog.frameGeometry()
-        dialog_geom.moveCenter(parent_geom.center())
-        dialog.move(dialog_geom.topLeft())
+        # Style dialog based on theme
+        if self.theme_action.isChecked():
+            dialog.setStyleSheet("""
+                QDialog {
+                    background: #333;
+                    color: white;
+                }
+                QScrollArea {
+                    background: transparent;
+                }
+                QLabel {
+                    background: transparent;
+                    color: white;
+                }
+            """)
 
         dialog.exec_()
 
@@ -1386,3 +1883,4 @@ if __name__ == "__main__":
     window.show()
     QGuiApplication.instance().setApplicationDisplayName("QuranSearch")
     sys.exit(app.exec_())
+
