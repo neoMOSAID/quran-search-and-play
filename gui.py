@@ -19,7 +19,9 @@ from datetime import datetime
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import QUrl, QSize, Qt, QSettings, QTimer
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtCore import QStandardPaths, QSettings
+from PyQt5.QtGui import QColor
 from search import QuranSearch
 
 import sqlite3
@@ -1418,15 +1420,14 @@ class QuranBrowser(QtWidgets.QMainWindow):
         last played (or currently playing) ayah to load that surah and scroll to it.
         Bind this method to Ctrl+K.
         """
-        if self.current_surah is None:
-            self.showMessage("No current playback info", 2000)
-            return
-
-        # Calculate the current ayah from the playback sequence.
-        # For example, if current_sequence_index is 0 then nothing has played yet,
-        # so we default to current_start_ayah; otherwise, use (current_start_ayah + current_sequence_index - 1).
-        current_ayah = self.current_start_ayah + max(self.current_sequence_index - 1, 0)
-        self.load_surah_from_current_ayah(surah=self.current_surah, selected_ayah=current_ayah)
+        current_media = self.player.media()
+        if current_media is not None:
+            url = current_media.canonicalUrl()
+            if url.isLocalFile():
+                file_path = url.toLocalFile()
+                current_surah = int(os.path.basename(file_path)[:3])
+                current_ayah = int(os.path.basename(file_path)[3:6])
+                self.load_surah_from_current_ayah(surah=current_surah, selected_ayah=current_ayah)
 
     # def focus_notes(self):
     #     if self.detail_view.isVisible():
@@ -1899,72 +1900,65 @@ class QuranBrowser(QtWidgets.QMainWindow):
             <a href="https://mosaid.xyz/quran-search">https://mosaid.xyz</a>"""
         )
 
+
+
     def show_help_dialog(self):
-        """Display comprehensive user manual from external HTML file"""
-        try:
-            # Get path to help file
-            base_dir = Path(__file__).parent
-            help_path = base_dir / "help" / "help_ar.html"
+        # Construct the full path to the help file (assuming it's in the same directory)
+        help_file = Path(os.path.dirname(__file__)) / "help" / "help_ar.html"
+        if not help_file.exists():
+            self.showMessage("Help file not found", 3000)
+            return
 
-            # Read HTML content
-            with open(help_path, "r", encoding="utf-8") as f:
-                help_content = f.read()
-        except Exception as e:
-            help_content = f"<h2>Error loading help file</h2><p>{str(e)}</p>"
-
-        # Create dialog
+        # Create a dialog to display the help
         dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle("دليل المستخدم - Quran Search")
-        #dialog.setMinimumSize(1000, 700)
-        dialog.setModal(True)
-        dialog.setFixedSize(800, 400)
-
-        # Main layout
+        dialog.setWindowTitle("دليل استخدام متصفح القرآن المتقدم")
+        dialog.resize(800, 600)
+        
         layout = QtWidgets.QVBoxLayout(dialog)
-
-        # Create scroll area
-        scroll = QtWidgets.QScrollArea()
-        scroll.setWidgetResizable(True)
-
-        # Create content widget
-        content = QtWidgets.QWidget()
-        scroll.setWidget(content)
-
-        # Content layout
-        content_layout = QtWidgets.QVBoxLayout(content)
-
-        # HTML viewer
-        html_label = QtWidgets.QLabel()
-        html_label.setTextFormat(QtCore.Qt.RichText)
-        html_label.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
-        html_label.setOpenExternalLinks(True)
-        html_label.setText(help_content)
-
-        # Add elements to layout
-        content_layout.addWidget(html_label)
-        layout.addWidget(scroll)
-
-        # Add close button
-        btn_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok)
-        btn_box.accepted.connect(dialog.accept)
-        layout.addWidget(btn_box)
-
-        # Style dialog based on theme
+        web_view = QWebEngineView(dialog)
+        layout.addWidget(web_view)
+        dialog.setLayout(layout)
+        
         if self.theme_action.isChecked():
-            dialog.setStyleSheet("""
-                QDialog {
-                    background: #333;
-                    color: white;
+            web_view.page().setBackgroundColor(QColor("#333333"))
+        else:
+            web_view.page().setBackgroundColor(QColor("#FFFFFF"))
+        
+        # Read the HTML file content
+        with open(str(help_file), 'r', encoding='utf-8') as f:
+            html_text = f.read()
+        
+        # If dark mode is active, inject the dark CSS directly into the HTML head.
+        if self.theme_action.isChecked():
+            dark_style = """
+            <style>
+                body {
+                    background-color: #333333 !important;
+                    color: #FFFFFF !important;
                 }
-                QScrollArea {
-                    background: transparent;
+                a {
+                    color: #1a73e8 !important;
                 }
-                QLabel {
-                    background: transparent;
-                    color: white;
+                h1, h2, h3 {
+                    border-color: #1a73e8 !important;
                 }
-            """)
-
+                .section, table {
+                    background-color: #444444 !important;
+                    color: #FFFFFF !important;
+                    box-shadow: none !important;
+                }
+                .shortcut-key {
+                    background: red;
+                }
+            </style>
+            """
+            # Insert dark_style right after the opening <head> tag.
+            html_text = html_text.replace("</head>",  dark_style + "</head>" )
+        
+        # Use the directory containing the help file as the base URL.
+        base_url = QtCore.QUrl.fromLocalFile(str(help_file.parent))
+        web_view.setHtml(html_text, base_url)
+        
         dialog.exec_()
 
 
