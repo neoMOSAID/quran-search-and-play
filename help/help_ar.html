@@ -23,8 +23,8 @@
         .section {
             background: white;
             padding: 25px;
-            margin: 20px 0;
-            border-radius: 10px;
+            margin: 10px 0;
+            border-radius: 15px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
         
@@ -169,8 +169,8 @@
 
         <h3>البحث بالسورة:</h3>
         <ul class="feature-list">
-            <li>اختيار السورة من القائمة المنسدلة</li>
-            <li>إدخال رقم السورة مباشرة (1-114)</li>
+            <li>اختيار السورة من القائمة المنسدلة أو باستعمال زري اليمين واليسار (<span class="shortcut-key">Left/Right</span>)</li>
+            <li>إدخال رقم السورة مباشرة (1-114) باستعمال (<span class="shortcut-key">Ctrl+W</span>)</li>
             <li>مثال: "5" لعرض سورة المائدة</li>
         </ul>
 
@@ -187,6 +187,7 @@
         <h3>مميزات التشغيل:</h3>
         <ul class="feature-list">
             <li>الإستماع لآية محددة (<span class="shortcut-key">Space</span>)</li>
+            <li>توقيف وإنهاء التلاوة   (<span class="shortcut-key">Ctrl+S</span>)</li>
             <li>تكرار الإستماع لنطاق الآيات الناتجة عن البحث بنطاق آيات (<span class="shortcut-key">Ctrl+R</span>)</li>
             <li>الإستماع لسورة كاملة ثم استمرار التلاوة للقرأن كاملا، تبدأ التلاوة من الآية المحددة (<span class="shortcut-key">Ctrl+A</span>)</li>
             <li>تلاوة الآية و 5 بعدها ،تبدأ التلاوة من الآية المحددة (<span class="shortcut-key">Ctrl+P</span>)</li>
@@ -199,7 +200,7 @@
             <li>تحديد مجلد الصوتيات من القائمة</li>
             <li>صيغة الملفات: SSSAAA.mp3 (3 أرقام للسورة، 3 أرقام للآية)</li>
             <li>مثال: 001001.mp3 لسورة الفاتحة آية 1</li>
-            <li>يمكنك تحميل القرآن الكريم مجزأ الى آيات</li>
+            <li>يمكنك تحميل القرآن الكريم مجزأ الى آيات من <a href="https://everyayah.com/recitations_ayat.html" >https://everyayah.com</a></li>
         </ul>
     </div>
 
@@ -222,10 +223,11 @@
         <h2>6. الميزات المتقدمة</h2>
         <h3>منظم دروس القرآن الكريم:</h3>
         <p>يمكنك من تسجيل عدة عمليات ثم تطبيقها بشكل أوتوماتيكي، مثلا تسجيل آية أو آيات، ثم بحث عن كلمة ، ثم آية وهكذا، ثم بعد ذلك  تستطيع استعمال هذا التسجيل أثناء عرضك لدرس قرآني</p>
-        <p>النقر مرتين أو (<span class="shortcut-key">Enter</span>) على تسجيل فارغ يمكنك من الكتابة</p>
         <ul class="feature-list">
             <li>فتح المنظم (<span class="shortcut-key">Ctrl+Shift+A</span>)</li>
+            <li>يمكنك استعمال زري اليمين و اليسار (<span class="shortcut-key">Left/Right</span>)  للإنتقال بين الدروس المسجلة</li>
             <li>إنشاء قوائم مخصصة من الآيات</li>
+            <li>النقر مرتين أو (<span class="shortcut-key">Enter</span>) على تسجيل فارغ يمكنك من الكتابة</li>
             <li>إضافة نطاقات آيات بالصيغة: a سورة آية_بداية آية_نهاية 
                 <br>
                 مثال : a 2 255 أو a 2 255 256
@@ -267,6 +269,11 @@
                     </tr>
                     <tr>
                         <td>التنقل</td>
+                        <td><span class="shortcut-key">Ctrl + W</span></td>
+                        <td>التحول الى "البحث بالسورة" ثم الانتقال إلى حقل البحث</td>
+                    </tr>
+                    <tr>
+                        <td>التنقل</td>
                         <td><span class="shortcut-key">Ctrl + J</span></td>
                         <td>الانتقال إلى سورة الآية المحددة</td>
                     </tr>
@@ -275,24 +282,58 @@
                         <td><span class="shortcut-key">Ctrl + K</span></td>
                         <td>العودة إلى سورة التشغيل الحالية</td>
                     </tr>
-                    
+                    <tr>
+                        <td>التنقل</td>
+                        <td>
+                            <span class="shortcut-key">Right →</span> / <span class="shortcut-key">← Left</span>
+                        </td>
+                        <td>التنقل بين السور</td>
+                    </tr>
+                    <tr>
+                        <td>التنقل</td>
+                        <td>
+                            <span class="shortcut-key">↑ Up</span> / <span class="shortcut-key">Down ↓</span>
+                        </td>
+                        <td>التنقل بين الآيات</td>
+                    </tr>    
+                    <tr>
+                        <td>التنقل</td>
+                        <td>
+                            <span class="shortcut-key">Backspace</span> 
+                        </td>
+                        <td> العودةالى النتائج من سياق الآية </td>
+                    </tr>                  
                     <tr><td colspan="3" class="category-header">التشغيل الصوتي</td></tr>
                     <tr>
                         <td>الصوت</td>
                         <td><span class="shortcut-key">Space</span></td>
-                        <td>تشغيل/إيقاف الآية المحددة</td>
+                        <td>تلاوة الآية المحددة</td>
                     </tr>
                     <tr>
-                        <td>الصوت</td>نطاقات
+                        <td>الصوت</td>
+                        <td><span class="shortcut-key">Ctrl + P</span></td>
+                        <td>تلاوة الآية و 5 بعدها </td>
+                    </tr>
+                    <tr>
+                        <td>الصوت</td>
                         <td><span class="shortcut-key">Ctrl + A</span></td>
-                        <td>تشغيل السورة كاملة</td>
+                        <td>تلاوة السورة كاملة</td>
                     </tr>
                     <tr>
                         <td>الصوت</td>
                         <td><span class="shortcut-key">Ctrl + Shift + P</span></td>
-                        <td>تشغيل جميع النتائج</td>
+                        <td>تلاوة جميع النتائج</td>
                     </tr>
-                    
+                    <tr>
+                        <td>الصوت</td>
+                        <td><span class="shortcut-key">Ctrl + R</span></td>
+                        <td> تكرار الإستماع لنطاق الآيات الناتجة عن البحث بنطاق آيات </td>
+                    </tr>
+                    <tr>
+                        <td>الصوت</td>
+                        <td><span class="shortcut-key">Ctrl + S</span></td>
+                        <td>  توقيف وإنهاء التلاوة</td>
+                    </tr>
                     <tr><td colspan="3" class="category-header">إدارة الملاحظات</td></tr>
                     <tr>
                         <td>الملاحظات</td>
@@ -306,10 +347,39 @@
                     </tr>
                     <tr>
                         <td>الملاحظات</td>
+                        <td><span class="shortcut-key">Ctrl + Delete</span></td>
+                        <td>حذف الملاحظة</td>
+                    </tr>
+                    <tr>
+                        <td>الملاحظات</td>
                         <td><span class="shortcut-key">Ctrl + E</span></td>
                         <td>تصدير الملاحظات</td>
                     </tr>
-                    
+                    <tr>
+                        <td>الملاحظات</td>
+                        <td><span class="shortcut-key">Ctrl + I</span></td>
+                        <td>استيراد الملاحظات</td>
+                    </tr>
+                    <tr><td colspan="3" class="category-header">إدارة الدروس</td></tr>
+                    <tr>
+                        <td>الدروس</td>
+                        <td><span class="shortcut-key">Ctrl + Shift + A</span></td>
+                        <td> إظهار نافذة الدروس</td>
+                    </tr>
+                    <tr>
+                        <td>الدروس</td>
+                        <td>
+                            <span class="shortcut-key">Right →</span> / <span class="shortcut-key">← Left</span>
+                        </td>
+                        <td>التنقل بين الدروس</td>
+                    </tr>
+                    <tr>
+                        <td>الدروس</td>
+                        <td>
+                            <span class="shortcut-key">↑ Up</span> / <span class="shortcut-key">Down ↓</span>
+                        </td>
+                        <td>التنقل بين التسجيلات</td>
+                    </tr>  
                     <tr><td colspan="3" class="category-header">الإعدادات العامة</td></tr>
                     <tr>
                         <td>التخصيص</td>
@@ -317,14 +387,14 @@
                         <td>تبديل الوضع الليلي</td>
                     </tr>
                     <tr>
-                        <td>التخصيص</td>
-                        <td><span class="shortcut-key">Esc</span></td>
-                        <td>تبديل نوع الخط</td>
+                        <td>المساعدة</td>
+                        <td><span class="shortcut-key">Ctrl + H</span></td>
+                        <td>  إظهار نافذة المساعدة</td>
                     </tr>
                     <tr>
                         <td>التخصيص</td>
-                        <td><span class="shortcut-key">Backspace</span></td>
-                        <td>العودة للنتائج</td>
+                        <td><span class="shortcut-key">Esc</span></td>
+                        <td>تبديل نوع الخط</td>
                     </tr>
                 </tbody>
             </table>
@@ -342,11 +412,11 @@
     </div>
 
     <div class="section" id="section9">
-        <h2>9. الدعم الفني</h2>
+        <h2>9. إدعمنا </h2>
         <ul class="feature-list">
-            <li>البريد الإلكتروني: <a href="mailto:support@mosaid.xyz">support@mosaid.xyz</a></li>
-            <li>الموقع الإلكتروني: <a href="https://mosaid.xyz/quran-search">mosaid.xyz/quran-search</a></li>
-            <li>قناة التليجرام: <a href="https://t.me/quran_search_support">t.me/quran_search_support</a></li>
+            <li>البريد الإلكتروني: <a href="mailto:support@mosaid.xyz">mail@mosaid.xyz</a></li>
+            <li>الموقع الإلكتروني: <a href="https://mosaid.xyz/quran-search">https://mosaid.xyz/quran-search</a></li>
+            <!-- <li>قناة التليجرام: <a href="https://t.me/quran_search_support">t.me/quran_search_support</a></li> -->
         </ul>
     </div>
 </body>

@@ -19,9 +19,9 @@ from datetime import datetime
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import QUrl, QSize, Qt, QSettings, QTimer
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
 from PyQt5.QtCore import QStandardPaths, QSettings
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QDesktopServices
 from search import QuranSearch
 
 import sqlite3
@@ -29,6 +29,24 @@ from pathlib import Path
 
 # Configure logging for debugging and error reporting.
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class CustomWebEnginePage(QWebEnginePage):
+    def acceptNavigationRequest(self, url, nav_type, isMainFrame):
+        if nav_type == QWebEnginePage.NavigationTypeLinkClicked:
+            # Open the URL in the default browser
+            QDesktopServices.openUrl(url)
+            return False  # Prevent the link from loading in the current view
+        return super().acceptNavigationRequest(url, nav_type, isMainFrame)
+
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller."""
+    try:
+        # When bundled, PyInstaller stores files in sys._MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # When running in development, use the directory of this script
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
 
 
 class NotesManager:
@@ -252,7 +270,7 @@ def get_audio_directory():
 
 
 # =============================================================================
-# STEP 1: Create a custom QAbstractListModel to replace the QListWidget.
+# 
 # =============================================================================
 class QuranListModel(QtCore.QAbstractListModel):
     loading_complete = QtCore.pyqtSignal()
@@ -310,7 +328,7 @@ class QuranListModel(QtCore.QAbstractListModel):
 
 
 # =============================================================================
-# STEP 2: Create a worker thread for asynchronous search operations.
+# 
 # =============================================================================
 class SearchWorker(QtCore.QThread):
     results_ready = QtCore.pyqtSignal(list)
@@ -355,7 +373,7 @@ class SearchWorker(QtCore.QThread):
             self.error_occurred.emit(str(e))
 
 # =============================================================================
-# STEP 3
+# 
 # =============================================================================
 class SearchLineEdit(QtWidgets.QLineEdit):
     def __init__(self, parent=None):
@@ -972,7 +990,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
 class QuranBrowser(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
+        icon_path = resource_path("icon.png")
         self.setWindowIcon(QtGui.QIcon(icon_path))
         self.search_engine = QuranSearch()
         self.ayah_selector = None
@@ -1130,6 +1148,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+J"), self, activated=self.load_surah_from_current_ayah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+K"), self, activated=self.load_surah_from_current_playback)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+N"), self, activated=self.new_note)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+E"), self, activated=self.export_notes)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+I"), self, activated=self.import_notes)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Delete"), self, activated=self.delete_note)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+A"), self, activated=self.show_ayah_selector)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+P"), self, activated=self.play_all_results)
@@ -1413,6 +1433,10 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.surah_combo.setCurrentIndex(current_index + 1)
             self.handle_surah_selection(self.surah_combo.currentIndex())
 
+    def backto_current_surah(self):
+        self.handle_surah_selection(self.current_surah-1)
+        current_ayah = self.current_start_ayah + self.current_sequence_index -1
+        self._scroll_to_ayah(self.current_surah,current_ayah)
 
     def load_surah_from_current_playback(self):
         """
@@ -1709,6 +1733,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             if self.playing_ayah_range:
                 self.playing_ayah_range = False
                 return
+
             # End of current surah reached: increment surah (wrap around if needed).
             if self.current_surah < 114:
                 self.current_surah += 1
@@ -1782,11 +1807,6 @@ class QuranBrowser(QtWidgets.QMainWindow):
         """Stop any current audio playback."""
         self.player.stop()
         self.status_bar.showMessage("Playback stopped", 2000)
-
-    def backto_current_surah(self):
-        self.handle_surah_selection(self.current_surah-1)
-        current_ayah = self.current_start_ayah + self.current_sequence_index -1
-        self._scroll_to_ayah(self.current_surah,current_ayah)
 
     def play_current_surah(self):
         """
@@ -1901,10 +1921,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
         )
 
 
-
     def show_help_dialog(self):
         # Construct the full path to the help file (assuming it's in the same directory)
-        help_file = Path(os.path.dirname(__file__)) / "help" / "help_ar.html"
+        help_file = Path(resource_path(os.path.join("help", "help_ar.html")))
         if not help_file.exists():
             self.showMessage("Help file not found", 3000)
             return
@@ -1913,21 +1932,25 @@ class QuranBrowser(QtWidgets.QMainWindow):
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle("دليل استخدام متصفح القرآن المتقدم")
         dialog.resize(800, 600)
-        
+
         layout = QtWidgets.QVBoxLayout(dialog)
         web_view = QWebEngineView(dialog)
+        
+        # Set our custom page so that external links open in the default browser
+        web_view.setPage(CustomWebEnginePage(web_view))
+        
         layout.addWidget(web_view)
         dialog.setLayout(layout)
-        
+
         if self.theme_action.isChecked():
             web_view.page().setBackgroundColor(QColor("#333333"))
         else:
             web_view.page().setBackgroundColor(QColor("#FFFFFF"))
-        
+
         # Read the HTML file content
         with open(str(help_file), 'r', encoding='utf-8') as f:
             html_text = f.read()
-        
+
         # If dark mode is active, inject the dark CSS directly into the HTML head.
         if self.theme_action.isChecked():
             dark_style = """
@@ -1952,14 +1975,15 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 }
             </style>
             """
-            # Insert dark_style right after the opening <head> tag.
-            html_text = html_text.replace("</head>",  dark_style + "</head>" )
-        
+            # Insert dark_style right before the closing </head> tag.
+            html_text = html_text.replace("</head>", dark_style + "</head>")
+
         # Use the directory containing the help file as the base URL.
         base_url = QtCore.QUrl.fromLocalFile(str(help_file.parent))
         web_view.setHtml(html_text, base_url)
-        
+
         dialog.exec_()
+
 
 
 if __name__ == "__main__":

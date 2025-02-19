@@ -1,6 +1,20 @@
 import re
-import os
-from pathlib import Path
+import os, sys
+import importlib.resources
+
+
+
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller."""
+    try:
+        # When bundled, PyInstaller stores files in sys._MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # When running in development, use the directory of this script
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+
 
 class QuranSearch:
     def __init__(self):
@@ -11,44 +25,40 @@ class QuranSearch:
         self._load_data()
 
     def _load_data(self):
-        """Load all required data files"""
-        base_dir = Path(__file__).parent
-        text_dir = base_dir / "quran-text"
-        
-        self._load_chapters(text_dir / "chapters.txt")
-        self._load_verses(text_dir / "uthmani.txt", self._uthmani)
-        self._load_verses(text_dir / "simplified.txt", self._simplified)
+        """Load all required data files from the quran_text package"""
+        self._load_chapters()
+        self._load_verses('uthmani.txt', self._uthmani)
+        self._load_verses('simplified.txt', self._simplified)
         self._build_verse_counts()
 
-    def _load_chapters(self, file_path):
-        """Load chapter names from file"""
+    def _load_chapters(self):
+        """Load chapter names from the quran_text package"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                self._chapters = [line.strip() for line in f]
-        except FileNotFoundError:
-            raise RuntimeError(f"Missing chapters file: {file_path}")
+            text = importlib.resources.read_text("quran_text", "chapters.txt", encoding="utf-8")
+            self._chapters = [line.strip() for line in text.splitlines()]
+        except Exception as e:
+            raise RuntimeError(f"Could not load chapters: {e}")
 
-    def _load_verses(self, file_path, target_dict):
-        """Generic verse loader for different versions"""
-        if not file_path.exists():
-            raise RuntimeError(f"Missing verse file: {file_path}")
-
-        with open(file_path, 'r', encoding='utf-8') as f:
-            for line_num, line in enumerate(f, 1):
+    def _load_verses(self, filename, target_dict):
+        """Generic verse loader for different versions from the quran_text package"""
+        try:
+            text = importlib.resources.read_text("quran_text", filename, encoding="utf-8")
+            for line in text.splitlines():
                 parts = line.strip().split('|')
                 if len(parts) < 3:
                     continue
-                
                 try:
                     surah = int(parts[0])
                     ayah = int(parts[1])
-                    text = '|'.join(parts[2:])
+                    text_line = '|'.join(parts[2:])
                     target_dict[(surah, ayah)] = {
-                        'text': text,
+                        'text': text_line,
                         'full': line.strip()
                     }
                 except (ValueError, IndexError):
                     continue
+        except Exception as e:
+            raise RuntimeError(f"Could not load {filename}: {e}")
 
     def _build_verse_counts(self):
         """Build dictionary of verse counts per surah"""
