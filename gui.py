@@ -196,6 +196,19 @@ class NotesManager:
             else:
                 cursor = conn.execute("INSERT INTO courses (title, items) VALUES (?, ?)", (title, items_json))
                 return cursor.lastrowid
+            
+    def create_new_course(self, title=None):
+        """Create a new empty course and return its ID"""
+        if not title:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            title = f"New Course {timestamp}"
+            
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute(
+                "INSERT INTO courses (title, items) VALUES (?, ?)",
+                (title, json.dumps([]))
+            )
+            return cursor.lastrowid
 
     def delete_course(self, course_id):
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -233,6 +246,16 @@ class NotesManager:
                 return row[0], {"title": row[1], "items": json.loads(row[2])}
         return self.get_new_course()
 
+    def get_all_courses(self):
+        """Return list of (id, title, items) for all courses"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT id, title, items FROM courses ORDER BY id DESC
+            """)
+            return [
+                (row[0], row[1], json.loads(row[2]))
+                for row in cursor.fetchall()
+            ]
 
 
 def get_default_audio_directory():
@@ -925,6 +948,14 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                         elif data['type'] == 'search':
                             self.search_requested.emit(data['query'])
                 return True
+            # Add Ctrl+Up/Down handling
+            if event.modifiers() & QtCore.Qt.ControlModifier:
+                if event.key() == QtCore.Qt.Key_Up:
+                    self.move_item_up()
+                    return True
+                elif event.key() == QtCore.Qt.Key_Down:
+                    self.move_item_down()
+                    return True
         return super().eventFilter(source, event)
 
     def load_new_course(self):
@@ -982,10 +1013,76 @@ class AyahSelectorDialog(QtWidgets.QDialog):
     def save_and_close(self):
         self.save_course()
         self.accept()
+    
+    def move_item_up(self):
+        current_row = self.list_view.currentIndex().row()
+        if current_row > 0:
+            self._swap_items(current_row, current_row - 1)
+            self.list_view.setCurrentIndex(self.model.index(current_row - 1, 0))
 
+    def move_item_down(self):
+        current_row = self.list_view.currentIndex().row()
+        if current_row < self.model.rowCount() - 1:
+            self._swap_items(current_row, current_row + 1)
+            self.list_view.setCurrentIndex(self.model.index(current_row + 1, 0))
+
+    def _swap_items(self, row1, row2):
+        # Handle downward movement adjustment
+        if row2 > row1:
+            row2 -= 1
+        
+        # Swap rows using model methods
+        item1 = self.model.takeRow(row1)
+        item2 = self.model.takeRow(row2)
+        self.model.insertRow(row2, item1)
+        self.model.insertRow(row1, item2)
+
+
+class CourseSelectionDialog(QtWidgets.QDialog):
+    def __init__(self, notes_manager, parent=None):
+        super().__init__(parent)
+        self.notes_manager = notes_manager
+        self.selected_course_id = None
+        self.init_ui()
+        self.load_courses()
+
+    def init_ui(self):
+        self.setWindowTitle("Add to Course")
+        self.resize(400, 300)
+        
+        layout = QtWidgets.QVBoxLayout()
+        
+        # Course list
+        self.course_list = QtWidgets.QListWidget()
+        self.course_list.itemDoubleClicked.connect(self.accept)
+        layout.addWidget(self.course_list)
+        
+        # Button box
+        button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        self.setLayout(layout)
+
+    def load_courses(self):
+        self.course_list.clear()
+        courses = self.notes_manager.get_all_courses()
+        for course_id, title, _ in courses:
+            item = QtWidgets.QListWidgetItem(title)
+            item.setData(Qt.UserRole, course_id)
+            self.course_list.addItem(item)
+
+    def get_selected_course(self):
+        selected = self.course_list.currentItem()
+        if selected:
+            return selected.data(Qt.UserRole)
+        return None
 
 # =============================================================================
-# STEP 4: Main application window with all improvements.
+# STEP 4: Main application window
 # =============================================================================
 class QuranBrowser(QtWidgets.QMainWindow):
     def __init__(self):
@@ -1155,6 +1252,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+P"), self, activated=self.play_all_results)
         QtWidgets.QShortcut(QtGui.QKeySequence("Left"), self, activated=self.navigate_surah_left)
         QtWidgets.QShortcut(QtGui.QKeySequence("Right"), self, activated=self.navigate_surah_right)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+C"), self, activated=self.add_ayah_to_course)
+
 
 
     def new_note(self):
@@ -1863,6 +1962,70 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         self.play_next_file()  # This method will chain playback for the sequence.
 
+    def add_ayah_to_course(self):
+        # Get selected ayah
+        index = self.results_view.currentIndex()
+        if not index.isValid():
+            self.showMessage("No verse selected", 3000)
+            return
+            
+        result = self.model.data(index, Qt.UserRole)
+        try:
+            surah = int(result['surah'])
+            ayah = int(result['ayah'])
+        except (KeyError, ValueError):
+            self.showMessage("Invalid verse data", 3000)
+            return
+
+        # Check for existing courses
+        courses = self.notes_manager.get_all_courses()
+        if not courses:
+            # Create new course if none exist
+            new_course_id = self.notes_manager.create_new_course()
+            courses = self.notes_manager.get_all_courses()
+
+        # Show course selection dialog
+        dialog = CourseSelectionDialog(self.notes_manager, self)
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            course_id = dialog.get_selected_course()
+            if course_id:
+                self._add_to_course(course_id, surah, ayah)
+
+    def _add_to_course(self, course_id, surah, ayah):
+        # Get existing course data
+        courses = self.notes_manager.get_all_courses()
+        course = next((c for c in courses if c[0] == course_id), None)
+        if not course:
+            return
+
+        # Create new item entry
+        new_entry = {
+            "text": f"Surah {surah}: Ayah {ayah}",
+            "user_data": {
+                "type": "ayah",
+                "surah": surah,
+                "start": ayah,
+                "end": ayah
+            }
+        }
+
+        # Update course items
+        _, title, items = course
+        updated_items = items.copy()
+        updated_items.append(json.dumps(new_entry))
+
+        # Save updated course
+        self.notes_manager.save_course(course_id, title, updated_items)
+        self.showMessage(f"Added to course: {title}", 3000)
+
+        # Refresh selector if open
+        if self.ayah_selector and self.ayah_selector.isVisible():
+            self.ayah_selector.load_course({
+                'title': title,
+                'items': updated_items
+            })
+
+
 
     def toggle_version(self):
         current = self.version_combo.currentIndex()
@@ -1922,69 +2085,67 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
 
     def show_help_dialog(self):
-        # Construct the full path to the help file (assuming it's in the same directory)
         help_file = Path(resource_path(os.path.join("help", "help_ar.html")))
         if not help_file.exists():
             self.showMessage("Help file not found", 3000)
             return
 
-        # Create a dialog to display the help
-        dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle("دليل استخدام متصفح القرآن المتقدم")
-        dialog.resize(800, 600)
+        # Create as persistent dialog
+        if not hasattr(self, 'help_dialog') or not self.help_dialog.isVisible():
+            self.help_dialog = QtWidgets.QDialog(self)
+            self.help_dialog.setWindowTitle("دليل استخدام متصفح القرآن المتقدم")
+            self.help_dialog.resize(800, 600)
+            
+            # Set non-modal properties
+            self.help_dialog.setWindowModality(QtCore.Qt.NonModal)
+            self.help_dialog.setAttribute(QtCore.Qt.WA_DeleteOnClose, False)
+            
+            layout = QtWidgets.QVBoxLayout(self.help_dialog)
+            web_view = QWebEngineView(self.help_dialog)
+            web_view.setPage(CustomWebEnginePage(web_view))
+            layout.addWidget(web_view)
+            
+            if self.theme_action.isChecked():
+                web_view.page().setBackgroundColor(QColor("#333333"))
+            else:
+                web_view.page().setBackgroundColor(QColor("#FFFFFF"))
 
-        layout = QtWidgets.QVBoxLayout(dialog)
-        web_view = QWebEngineView(dialog)
-        
-        # Set our custom page so that external links open in the default browser
-        web_view.setPage(CustomWebEnginePage(web_view))
-        
-        layout.addWidget(web_view)
-        dialog.setLayout(layout)
+            with open(str(help_file), 'r', encoding='utf-8') as f:
+                html_text = f.read()
 
-        if self.theme_action.isChecked():
-            web_view.page().setBackgroundColor(QColor("#333333"))
+            if self.theme_action.isChecked():
+                dark_style = """
+                <style>
+                    body {
+                        background-color: #333333 !important;
+                        color: #FFFFFF !important;
+                    }
+                    a {
+                        color: #1a73e8 !important;
+                    }
+                    h1, h2, h3 {
+                        border-color: #1a73e8 !important;
+                    }
+                    .section, table {
+                        background-color: #444444 !important;
+                        color: #FFFFFF !important;
+                        box-shadow: none !important;
+                    }
+                    .shortcut-key {
+                        background: red;
+                    }
+                </style>
+                """
+                html_text = html_text.replace("</head>", dark_style + "</head>")
+
+            base_url = QtCore.QUrl.fromLocalFile(str(help_file.parent))
+            web_view.setHtml(html_text, base_url)
+        
+        # Toggle visibility rather than creating new
+        if self.help_dialog.isVisible():
+            self.help_dialog.hide()
         else:
-            web_view.page().setBackgroundColor(QColor("#FFFFFF"))
-
-        # Read the HTML file content
-        with open(str(help_file), 'r', encoding='utf-8') as f:
-            html_text = f.read()
-
-        # If dark mode is active, inject the dark CSS directly into the HTML head.
-        if self.theme_action.isChecked():
-            dark_style = """
-            <style>
-                body {
-                    background-color: #333333 !important;
-                    color: #FFFFFF !important;
-                }
-                a {
-                    color: #1a73e8 !important;
-                }
-                h1, h2, h3 {
-                    border-color: #1a73e8 !important;
-                }
-                .section, table {
-                    background-color: #444444 !important;
-                    color: #FFFFFF !important;
-                    box-shadow: none !important;
-                }
-                .shortcut-key {
-                    background: red;
-                }
-            </style>
-            """
-            # Insert dark_style right before the closing </head> tag.
-            html_text = html_text.replace("</head>", dark_style + "</head>")
-
-        # Use the directory containing the help file as the base URL.
-        base_url = QtCore.QUrl.fromLocalFile(str(help_file.parent))
-        web_view.setHtml(html_text, base_url)
-
-        dialog.exec_()
-
-
+            self.help_dialog.show()
 
 if __name__ == "__main__":
     from PyQt5.QtGui import QGuiApplication

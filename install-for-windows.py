@@ -1,17 +1,53 @@
 #!/usr/bin/env python
 """
-install.py – Enhanced Install Script for Quran Search on Windows
+Enhanced Install Script for Quran Search on Windows
 
 This script performs the following:
-1. Creates a virtual environment (in the "env" folder) if it doesn’t already exist.
-2. Installs required dependencies from requirements.txt.
-3. Creates a command-line wrapper (a .bat file) that launches gui.py using the virtual environment's Python.
-4. Attempts to create a desktop shortcut for the application.
+1. Copies necessary files from the source directory to a secure installation directory 
+   (by default: "C:\Program Files\Quran Search").
+2. Creates a virtual environment (in the "env" folder) if it doesn’t already exist.
+3. Installs required dependencies from requirements.txt.
+4. Ensures winshell and pywin32 are installed (needed for shortcut creation).
+5. Creates two launchers:
+   - A CLI batch file launcher.
+   - A subtle VBScript launcher (which hides the command window).
+6. Creates an uninstall.bat that removes the secure install directory.
+7. Creates a Start Menu folder containing shortcuts to the subtle launcher and the uninstall script.
 """
 
 import os
 import sys
 import subprocess
+import shutil
+
+def create_secure_directory(secure_dir):
+    if not os.path.exists(secure_dir):
+        os.makedirs(secure_dir)
+        print("Created secure directory:", secure_dir)
+    else:
+        print("Secure directory already exists:", secure_dir)
+
+def copy_files_to_secure_dir(source_dir, secure_dir):
+    """
+    Copy all necessary files from source_dir to secure_dir.
+    Skip directories or files that are generated (like 'env' or previous launchers).
+    """
+    for item in os.listdir(source_dir):
+        if item in ["env", "uninstall.bat", "quranSearch.bat", "quranSearch.vbs", "venv_win"]:
+            continue  # Skip generated files and folders
+        src = os.path.join(source_dir, item)
+        dst = os.path.join(secure_dir, item)
+        try:
+            if os.path.isdir(src):
+                if os.path.exists(dst):
+                    shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+                print("Copied directory:", src, "to", dst)
+            else:
+                shutil.copy2(src, dst)
+                print("Copied file:", src, "to", dst)
+        except Exception as e:
+            print("Error copying {}: {}".format(src, e))
 
 def create_virtual_environment(install_dir):
     """Create a virtual environment in the 'env' folder if it does not exist."""
@@ -28,18 +64,18 @@ def create_virtual_environment(install_dir):
         sys.exit(1)
     return venv_path
 
-
-def install_requirements(venv_path, install_dir): 
-    """Install dependencies from requirements.txt using the virtual environment's pip. 
-    If installation fails (e.g., due to version conflicts for PyQt5 or PyQtWebEngine),
-    it will attempt to install these two packages individually without version restrictions. """ 
-    req_file = os.path.join(install_dir, "requirements.txt") 
-    if not os.path.exists(req_file): 
-        print("No requirements.txt found in", install_dir) 
+def install_requirements(venv_path, install_dir):
+    """
+    Install dependencies from requirements.txt using the virtual environment's pip.
+    If installation fails (e.g., version conflicts for PyQt5 or PyQtWebEngine),
+    it will try to install these two packages individually.
+    """
+    req_file = os.path.join(install_dir, "requirements.txt")
+    if not os.path.exists(req_file):
+        print("No requirements.txt found in", install_dir)
         return
-    
+
     print("Installing requirements from:", req_file)
-    # On Windows, the pip executable is located in the Scripts folder.
     pip_executable = os.path.join(venv_path, "Scripts", "pip.exe")
     if not os.path.exists(pip_executable):
         print("pip executable not found at:", pip_executable)
@@ -48,71 +84,166 @@ def install_requirements(venv_path, install_dir):
         subprocess.check_call([pip_executable, "install", "-r", req_file])
     except subprocess.CalledProcessError as e:
         print("Error installing requirements with specified versions:", e)
-        print("No matching versions found. Trying to install PyQt5 and PyQtWebEngine individually without version restrictions.")
+        print("Attempting to install PyQt5 and PyQtWebEngine without version restrictions.")
         try:
             subprocess.check_call([pip_executable, "install", "PyQt5", "PyQtWebEngine"])
         except subprocess.CalledProcessError as e2:
-            print("Error installing PyQt5 and PyQtWebEngine individually:", e2)
+            print("Error installing PyQt5 and PyQtWebEngine:", e2)
             sys.exit(1)
 
+def ensure_extra_packages(venv_path):
+    """
+    Ensure that winshell and pywin32 are installed,
+    as they are needed to create shortcuts.
+    """
+    pip_executable = os.path.join(venv_path, "Scripts", "pip.exe")
+    try:
+        subprocess.check_call([pip_executable, "install", "winshell", "pywin32"])
+        print("Installed winshell and pywin32.")
+    except subprocess.CalledProcessError as e:
+        print("Error installing winshell and pywin32:", e)
+        sys.exit(1)
 
-def create_windows_wrapper(install_dir, venv_path):
-    """Create a batch file wrapper and optionally a desktop shortcut."""
-    # Determine the path to the Python executable in the virtual environment.
+def create_launchers(install_dir, venv_path):
+    """
+    Create two launcher files:
+    1. A CLI batch wrapper (quranSearch.bat) that runs gui.py using the virtual environment's Python.
+    2. A subtle VBScript launcher (quranSearch.vbs) that starts the application with no visible console.
+    """
     python_exec = os.path.join(venv_path, "Scripts", "python.exe")
     if not os.path.exists(python_exec):
         print("Error: Python executable not found at", python_exec)
         sys.exit(1)
+    gui_py = os.path.join(install_dir, "gui.py")
+    if not os.path.exists(gui_py):
+        print("Error: gui.py not found in", install_dir)
+        sys.exit(1)
     
-    # Create a batch file wrapper in the installation directory.
-    wrapper_path = os.path.join(install_dir, "quranSearch.bat")
-    with open(wrapper_path, "w") as f:
-        f.write(r"""@echo off
-start "" "{}" "{}"
-""".format(python_exec, os.path.join(install_dir, "gui.py")))
-    print("Batch file wrapper created at:", wrapper_path)
+    # Create CLI batch wrapper (still provided for users who prefer it)
+    cli_wrapper_path = os.path.join(install_dir, "quranSearch.bat")
+    with open(cli_wrapper_path, "w") as f:
+        f.write(r'''@echo off
+"%~dp0\env\Scripts\python.exe" "%~dp0\gui.py"
+pause
+''')
+    print("Created CLI batch launcher at:", cli_wrapper_path)
     
-    # Attempt to create a desktop shortcut.
+    # Create subtle VBScript launcher to avoid the cmd window
+    vbscript_path = os.path.join(install_dir, "quranSearch.vbs")
+    # The VBScript directly launches the Python executable with gui.py hidden (0 = no window)
+    command = '"{}" "{}"'.format(python_exec, gui_py)
+    vbscript_content = (
+        'Set WshShell = CreateObject("WScript.Shell")\n'
+        'WshShell.Run "{}", 0, False'.format(command)
+    )
+    with open(vbscript_path, "w") as f:
+        f.write(vbscript_content)
+    print("Created VBScript launcher at:", vbscript_path)
+    
+    return cli_wrapper_path, vbscript_path
+
+def create_uninstall_script(install_dir):
+    """
+    Create an uninstall.bat that, when run, will remove the secure installation directory
+    (i.e. the virtual environment and all copied files).
+    WARNING: This will delete ALL files in the install directory.
+    """
+    uninstall_path = os.path.join(install_dir, "uninstall.bat")
+    uninstall_content = r'''@echo off
+echo Uninstalling Quran Search...
+cd /d "%~dp0"
+rmdir /S /Q .
+echo Uninstallation complete.
+pause
+'''
+    with open(uninstall_path, "w") as f:
+        f.write(uninstall_content)
+    print("Created uninstall script at:", uninstall_path)
+    return uninstall_path
+
+def create_start_menu_shortcuts(install_dir, subtle_launcher, uninstall_script):
+    """
+    Create a Start Menu folder ("Quran Search") and add shortcuts for:
+    - The subtle (VBScript) launcher.
+    - The uninstall script.
+    """
     try:
         import winshell
         from win32com.client import Dispatch
-        desktop = winshell.desktop()
-        shortcut_path = os.path.join(desktop, "Quran Search.lnk")
-        target = wrapper_path
-        icon = os.path.join(install_dir, "icon.png")
-        
-        shell = Dispatch('WScript.Shell')
-        shortcut = shell.CreateShortCut(shortcut_path)
-        shortcut.Targetpath = target
-        shortcut.WorkingDirectory = install_dir
-        # Use the icon if available; otherwise, default to the batch file.
-        shortcut.IconLocation = icon if os.path.exists(icon) else target
-        shortcut.save()
-        print("Desktop shortcut created at:", shortcut_path)
     except ImportError:
-        print("winshell module not found. To create a desktop shortcut, install it via pip (pip install winshell pywin32).")
-    except Exception as e:
-        print("Error creating desktop shortcut:", e)
+        print("winshell and pywin32 are not available; cannot create Start Menu shortcuts.")
+        return
+    # Determine the Start Menu folder path (per-user)
+    start_menu_dir = os.path.join(os.environ.get("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", "Quran Search")
+    if not os.path.exists(start_menu_dir):
+        os.makedirs(start_menu_dir)
+        print("Created Start Menu directory at:", start_menu_dir)
+    
+    shell = Dispatch('WScript.Shell')
+    
+    # Shortcut for the subtle launcher
+    shortcut_path = os.path.join(start_menu_dir, "Quran Search.lnk")
+    shortcut = shell.CreateShortCut(shortcut_path)
+    # Use the VBScript launcher so that no console window appears.
+    shortcut.Targetpath = os.path.abspath(subtle_launcher)
+    shortcut.WorkingDirectory = install_dir
+    icon_path = os.path.join(install_dir, "icon.ico")
+    if os.path.exists(icon_path):
+        shortcut.IconLocation = icon_path
+    else:
+        shortcut.IconLocation = shortcut.Targetpath
+    shortcut.save()
+    print("Created Start Menu shortcut at:", shortcut_path)
+    
+    # Shortcut for uninstalling the application
+    uninstall_shortcut_path = os.path.join(start_menu_dir, "Uninstall Quran Search.lnk")
+    uninstall_shortcut = shell.CreateShortCut(uninstall_shortcut_path)
+    uninstall_shortcut.Targetpath = os.path.abspath(uninstall_script)
+    uninstall_shortcut.WorkingDirectory = install_dir
+    uninstall_shortcut.IconLocation = uninstall_shortcut.Targetpath
+    uninstall_shortcut.save()
+    print("Created Start Menu uninstall shortcut at:", uninstall_shortcut_path)
 
 def main():
     if os.name != "nt":
         print("This install.py script is intended for Windows systems.")
         sys.exit(1)
     
-    # Determine the installation directory (the directory containing this script)
-    install_dir = os.path.dirname(os.path.abspath(__file__))
-    print("Installation directory:", install_dir)
+    # Determine the current (source) installation directory (the directory containing this script)
+    source_dir = os.path.dirname(os.path.abspath(__file__))
+    print("Source directory:", source_dir)
     
-    # Step 1: Create the virtual environment.
+    # Define the secure installation directory (defaulting to "Program Files\Quran Search")
+    program_files = os.environ.get("ProgramFiles", "C:\\Program Files")
+    secure_dir = os.path.join(program_files, "Quran Search")
+    
+    # Create the secure installation directory and copy files to it
+    create_secure_directory(secure_dir)
+    copy_files_to_secure_dir(source_dir, secure_dir)
+    
+    # Now work in the secure installation directory
+    install_dir = secure_dir
+    print("Installation directory (secure):", install_dir)
+    
+    # Create the virtual environment
     venv_path = create_virtual_environment(install_dir)
     
-    # Step 2: Install required packages from requirements.txt.
+    # Install required packages from requirements.txt
     install_requirements(venv_path, install_dir)
     
-    # Step 3: Create the command-line wrapper and desktop shortcut.
-    create_windows_wrapper(install_dir, venv_path)
+    # Ensure winshell and pywin32 are installed
+    ensure_extra_packages(venv_path)
     
-    print("Installation completed on Windows.")
+    # Create launchers (both CLI and subtle VBScript)
+    cli_launcher, vbscript_launcher = create_launchers(install_dir, venv_path)
+    
+    # Create the uninstall script
+    uninstall_script = create_uninstall_script(install_dir)
+    
+    # Create Start Menu shortcuts (in a Start folder containing the subtle launcher and uninstall shortcut)
+    create_start_menu_shortcuts(install_dir, vbscript_launcher, uninstall_script)
+    
+    print("Installation completed on Windows in secure directory:", install_dir)
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,168 @@
+.TH QURANSEARCH 1 "October 2023" "Quran Search" "User Guide"
+.SH NAME
+quransearch \- Advanced Quran Search Browser
+.SH SYNOPSIS
+.B quransearch
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+Quran Search is an advanced application designed for searching, listening to, and studying Quran verses. It offers a rich set of features including text and surah search, audio recitations, note management, and lesson organization. The interface is fully customizable (including light/dark mode) and supports CSV import/export of notes.
+
+.SH USER INTERFACE
+The application’s interface consists of several main components:
+.IP "Search Bar:"
+A top search area featuring:
+.TP
+- A dropdown list of all 114 surahs.
+- Options for different search modes (text, surah, or verse range).
+- A smart input field with auto-suggestions.
+.IP "Results Area:"
+Displays matching verses with full Quranic numbering, smooth scrolling, and arrow-key navigation.
+.IP "Context Area:"
+Shows the surrounding context (five verses before and after) for a selected verse along with an integrated editor for adding notes or reflections.
+
+.SH SEARCH TYPES
+The application supports three primary search methods:
+.IP "Text Search:"
+Keyword-based search in the Quranic text (supports both Uthmani and simplified scripts).
+Example: \fB"الرحمن الرحيم"\fR.
+.IP "Surah Search:"
+Select a surah from the dropdown or use arrow keys; you can also input a surah number directly (1–114) using \fBCtrl+W\fR.
+Example: Entering \fB5\fR will display Surah Al-Ma'idah.
+.IP "Verse Range Search:"
+Specify a surah followed by start and end verse numbers.
+Example: \fB"2 255 260"\fR to search verses 255–260 of Surah Al-Baqarah.
+
+.SH AUDIO RECITATION
+Key audio features include:
+.IP "Play Recitation:"
+Press \fBSpace\fR to play the selected verse.
+.IP "Stop Recitation:"
+Press \fBCtrl+S\fR.
+.IP "Repeat Range:"
+Press \fBCtrl+R\fR to repeat a specified verse range.
+.IP "Full Surah or Quran Recitation:"
+Press \fBCtrl+A\fR to recite the entire surah (continuing into the rest of the Quran if desired) or \fBCtrl+Shift+P\fR to play all search results starting from the selected verse.
+.PP
+Audio playback automatically advances to the next verse after each recitation.
+
+.SH NOTES AND REFLECTIONS
+Manage your study notes and reflections with these features:
+.IP "New Note:"
+Create a new note using \fBCtrl+N\fR.
+.IP "Save Note:"
+Press \fBCtrl+S\fR to save changes.
+.IP "Delete Note:"
+Use \fBCtrl+Delete\fR to remove a note.
+.IP "Import/Export:"
+Notes can be exported to or imported from CSV files.
+
+.SH ADVANCED FEATURES
+The lesson organizer allows you to record sequences of actions (such as selecting verses and performing searches) and replay them later during a study session. Additional customization features include:
+.IP "Customization:"
+Toggle dark mode with \fBCtrl+D\fR and change font settings using \fBEsc\fR.
+
+.SH KEYBOARD SHORTCUTS
+A summary of keyboard shortcuts:
+.TP
+\fBCtrl+F\fR
+Go to the search field.
+.TP
+\fBCtrl+W\fR
+Switch to surah search mode.
+.TP
+\fBCtrl+J\fR
+Jump directly to a specified surah.
+.TP
+\fBCtrl+K\fR
+Return to the current surah view.
+.TP
+\fBRight Arrow\fR / \fBLeft Arrow\fR
+Navigate between surahs.
+.TP
+\fBUp Arrow\fR / \fBDown Arrow\fR
+Move between verses.
+.TP
+\fBBackspace\fR
+Return from the context view to the results.
+.PP
+Audio Controls:
+.TP
+\fBSpace\fR
+Play the selected verse.
+.TP
+\fBCtrl+P\fR
+Play the selected verse plus the following five verses.
+.TP
+\fBCtrl+A\fR
+Play the entire surah (and continue if applicable).
+.TP
+\fBCtrl+Shift+P\fR
+Play all search results.
+.TP
+\fBCtrl+R\fR
+Repeat the current verse range.
+.TP
+\fBCtrl+S\fR
+Stop playback.
+.PP
+Notes Management:
+.TP
+\fBCtrl+N\fR
+Create a new note.
+.TP
+\fBCtrl+S\fR
+Save the current note.
+.TP
+\fBCtrl+Delete\fR
+Delete the current note.
+.TP
+\fBCtrl+E\fR
+Export notes.
+.TP
+\fBCtrl+I\fR
+Import notes.
+.PP
+Lesson Organizer:
+.TP
+\fBCtrl+Shift+A\fR
+Open the lesson organizer.
+.TP
+\fBRight/Left Arrow\fR
+Navigate between recorded lessons.
+.TP
+\fBUp/Down Arrow\fR
+Scroll between recordings.
+.TP
+\fBCtrl+Up/Down\fR
+Reorder recordings.
+.TP
+\fBCtrl+Shift+C\fR
+Add the selected verse to a lesson.
+.PP
+General:
+.TP
+\fBCtrl+D\fR
+Toggle dark mode.
+.TP
+\fBCtrl+H\fR
+Display the help window.
+.TP
+\fBEsc\fR
+Change the font type.
+.SH IMPORT/EXPORT
+The application supports CSV export/import of notes and reflections, allowing you to back up your data or transfer it between systems. Settings are automatically saved, with an option to restore defaults.
+.SH SUPPORT
+For further assistance:
+.IP
+Email: \fBmail@mosaid.xyz\fR
+.IP
+Website: \fBhttps://mosaid.xyz/quran-search\fR
+.SH FILES
+The Quran Search application and its resources are installed under a user-writable directory (default: \fB$HOME/.local/share/quranSearch\fR). The man page itself is provided here for offline reference.
+.SH SEE ALSO
+.B quranSearch(1)
+.SH AUTHOR
+Developed by [Your Name or Organization]
+.SH COPYRIGHT
+Copyright © 2025 [Your Organization]. All rights reserved.
+
