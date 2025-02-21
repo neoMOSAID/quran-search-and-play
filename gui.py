@@ -231,6 +231,31 @@ class NotesManager:
     def get_new_course(self):
         return None, {"title": "", "items": []}
 
+    def has_any_courses(self):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("SELECT EXISTS(SELECT 1 FROM courses)")
+            return cursor.fetchone()[0] == 1
+        
+    def has_previous_course(self, current_id):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            if current_id is None:
+                return False  # New course can't have previous
+            cursor = conn.execute(
+                "SELECT EXISTS(SELECT 1 FROM courses WHERE id < ? ORDER BY id DESC LIMIT 1)",
+                (current_id,)
+            )
+            return cursor.fetchone()[0] == 1
+
+    def has_next_course(self, current_id):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            if current_id is None:
+                return False  # New course can't have next
+            cursor = conn.execute(
+                "SELECT EXISTS(SELECT 1 FROM courses WHERE id > ? ORDER BY id ASC LIMIT 1)",
+                (current_id,)
+            )
+            return cursor.fetchone()[0] == 1
+
     def get_previous_course(self, current_id):
         with sqlite3.connect(str(self.db_path)) as conn:
             if current_id is None:
@@ -576,7 +601,6 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         doc.setTextWidth(option.rect.width() - 20)
         return QSize(int(doc.idealWidth()) + 20, int(doc.size().height()))
 
-
 class BookmarkModel(QtCore.QAbstractListModel):
     def __init__(self):
         super().__init__()
@@ -587,10 +611,10 @@ class BookmarkModel(QtCore.QAbstractListModel):
         self.load_timer.timeout.connect(self.load_next_chunk)
 
     def rowCount(self, parent=QtCore.QModelIndex()):
-        return self._loaded_count
+        return min(self._loaded_count, len(self._bookmarks))
 
     def data(self, index, role=QtCore.Qt.DisplayRole):
-        if not index.isValid() or index.row() >= self._loaded_count:
+        if not index.isValid() or index.row() >= len(self._bookmarks):
             return None
             
         bm = self._bookmarks[index.row()]
@@ -611,7 +635,7 @@ class BookmarkModel(QtCore.QAbstractListModel):
     def load_bookmarks(self, bookmarks):
         self.beginResetModel()
         self._bookmarks = bookmarks
-        self._loaded_count = 0
+        self._loaded_count = min(self._loaded_count, len(self._bookmarks))
         self.endResetModel()
         self.load_timer.start(0)  # Start loading immediately
         self.layoutChanged.emit()
@@ -973,9 +997,10 @@ class AyahSelectorDialog(QtWidgets.QDialog):
 
         # Add shortcuts for navigation (left/right arrow keys)
         self.shortcut_prev = QtWidgets.QShortcut(QtGui.QKeySequence("Left"), self)
-        self.shortcut_prev.activated.connect(self.load_previous_course_and_focus)
+        self.shortcut_prev.activated.connect(self._handle_prev_shortcut)
         self.shortcut_next = QtWidgets.QShortcut(QtGui.QKeySequence("Right"), self)
-        self.shortcut_next.activated.connect(self.load_next_course_and_focus)
+        self.shortcut_next.activated.connect(self._handle_next_shortcut)
+        
 
     def init_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
@@ -1002,6 +1027,20 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         )
         self.list_view.installEventFilter(self)
         layout.addWidget(self.list_view)
+        #rtl 
+        self.list_view.setLayoutDirection(QtCore.Qt.RightToLeft)
+        self.list_view.setStyleSheet("""
+            QListView {
+                font-family: 'Amiri';
+                font-size: 14pt;
+            }
+            QListView::item {
+                font-family: 'Amiri';
+                font-size: 14pt;
+                padding: 8px 0;
+                border-bottom: 1px solid #eee;
+            }
+        """)
 
         # Status label (for validation and course messages)
         self.status_label = QtWidgets.QLabel("")
@@ -1030,6 +1069,14 @@ class AyahSelectorDialog(QtWidgets.QDialog):
     def load_next_course_and_focus(self):
         self.load_next_course()
         self.list_view.setFocus()
+
+    def _handle_prev_shortcut(self):
+        if self.prev_button.isEnabled():
+            self.load_previous_course_and_focus()
+
+    def _handle_next_shortcut(self):
+        if self.next_button.isEnabled():
+            self.load_next_course_and_focus()
 
     def update_status(self, message):
         self.status_label.setText(message)
@@ -1075,6 +1122,11 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                 item.setText("بحث")
                 self.model.blockSignals(False)
 
+    def update_item_alignment(self, index):
+        item = self.model.itemFromIndex(index)
+        if item:
+            item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+
     def on_item_changed(self, item):
         text = item.text().strip()
         row = self.model.indexFromItem(item).row()
@@ -1094,7 +1146,8 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                 surah = int(parts[1])
                 start = int(parts[2])
                 end = int(parts[3]) if len(parts) == 4 else start
-                formatted = f"Surah {surah}: Ayah {start}-{end}" if start != end else f"Surah {surah}: Ayah {start}"
+                chapter_name = self.parent().search_engine.get_chapter_name(surah)
+                formatted = f"{chapter_name} آية {start}-{end}" if start != end else f"{chapter_name} آية {start}"
                 item.setText(formatted)
                 item.setData({'type': 'ayah', 'surah': surah, 'start': start, 'end': end}, Qt.UserRole)
                 self.update_status("Valid input.")
@@ -1149,33 +1202,78 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                 break
 
     def load_previous_course(self):
-        self.current_course_id, course = self.notes_manager.get_previous_course(self.current_course_id)
-        self.load_course(course)
+        prev_id, prev_course = self.notes_manager.get_previous_course(self.current_course_id)
+        if prev_id == self.current_course_id:  # No more previous courses
+            return
+        self.current_course_id = prev_id
+        self.load_course(prev_course)
+        self.update_navigation_buttons()
 
     def load_next_course(self):
-        self.current_course_id, course = self.notes_manager.get_next_course(self.current_course_id)
-        self.load_course(course)
+        next_id, next_course = self.notes_manager.get_next_course(self.current_course_id)
+        if next_id == self.current_course_id:  # No more next courses
+            return
+        self.current_course_id = next_id
+        self.load_course(next_course)
+        self.update_navigation_buttons()
+
+    def update_navigation_buttons(self):
+        """Enable/disable buttons based on course position"""
+        # Handle new course (ID None) case
+        if self.current_course_id is None:
+            # Check if any courses exist at all
+            has_any = self.notes_manager.has_any_courses()
+            self.prev_button.setEnabled(has_any)  # Can go to last existing course
+            self.next_button.setEnabled(False)    # No next after new course
+        else:
+            # Existing course logic
+            has_prev = self.notes_manager.has_previous_course(self.current_course_id)
+            has_next = self.notes_manager.has_next_course(self.current_course_id)
+            self.prev_button.setEnabled(has_prev)
+            self.next_button.setEnabled(has_next)
 
     def load_course(self, course):
         self.model.clear()
         self.course_input.setText(course['title'])
+        
         for item_str in course['items']:
             try:
-                # Try to parse the saved JSON data.
                 item_data = json.loads(item_str)
-                text = item_data.get("text", "")
-                user_data = item_data.get("user_data", None)
+                user_data = item_data.get("user_data")
+                text = self.format_display_text(item_data)
             except Exception:
-                # Fallback: treat it as plain text.
                 text = item_str
                 user_data = None
+
             list_item = QtGui.QStandardItem(text)
-            list_item.setEditable(True)
-            if user_data is not None:
+            if user_data:
                 list_item.setData(user_data, Qt.UserRole)
             self.model.appendRow(list_item)
+        
         self.add_empty_item()
         self.update_status(f"Loaded course ID: {self.current_course_id}")
+        self.update_navigation_buttons()
+
+    def format_display_text(self, item_data):
+        """Convert stored data to display text with chapter names"""
+        user_data = item_data.get("user_data")
+        if not user_data:
+            return item_data.get("text", "")
+            
+        if user_data.get('type') == 'ayah':
+            surah = user_data['surah']
+            chapter_name = self.parent().search_engine.get_chapter_name(surah)
+            start = user_data['start']
+            end = user_data.get('end', start)
+            
+            if start == end:
+                return f"{chapter_name} آية {start}"
+            return f"{chapter_name} آية {start}-{end}"
+            
+        if user_data.get('type') == 'search':
+            return f"بحث عن {user_data.get('query', '')}"
+            
+        return item_data.get("text", "")
 
     def save_course(self):
         title = self.course_input.text().strip() or f"درس رقم {self.current_course_id or 'NEW'}"
@@ -1397,12 +1495,18 @@ class BookmarkDialog(QtWidgets.QDialog):
         if not selected:
             return
             
-        # Remove in reverse order to preserve indexes
+        # Remove in reverse order
         for index in sorted(selected, reverse=True):
+            row = index.row()
+            if row >= len(self.model._bookmarks):
+                continue  # Prevent invalid access
+                
             bm = self.model.data(index, Qt.UserRole)
             self.parent.notes_manager.delete_bookmark(bm['surah'], bm['ayah'])
-            self.model.beginRemoveRows(QtCore.QModelIndex(), index.row(), index.row())
-            del self.model._bookmarks[index.row()]
+            
+            self.model.beginRemoveRows(QtCore.QModelIndex(), row, row)
+            del self.model._bookmarks[row]
+            self.model._loaded_count = min(self.model._loaded_count, len(self.model._bookmarks))
             self.model.endRemoveRows()
 
 
