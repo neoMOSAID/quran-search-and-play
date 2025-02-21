@@ -15,6 +15,7 @@ import csv
 import json
 import logging
 from datetime import datetime
+from collections import OrderedDict
 
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtCore import QUrl, QSize, Qt, QSettings, QTimer
@@ -22,6 +23,10 @@ from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
 from PyQt5.QtCore import QStandardPaths, QSettings
 from PyQt5.QtGui import QColor, QDesktopServices
+from PyQt5.QtCore import QMetaType, QPersistentModelIndex
+
+#QMetaType.registerType('QList<QPersistentModelIndex>', lambda: list)
+
 from search import QuranSearch
 
 import sqlite3
@@ -77,6 +82,15 @@ class NotesManager:
                     items TEXT NOT NULL -- JSON-encoded list of items
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS bookmarks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    surah INTEGER NOT NULL,
+                    ayah INTEGER NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_bookmarks ON bookmarks (timestamp)")
 
     def get_notes(self, surah, ayah):
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -256,6 +270,40 @@ class NotesManager:
                 (row[0], row[1], json.loads(row[2]))
                 for row in cursor.fetchall()
             ]
+        
+    def add_bookmark(self, surah, ayah):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            # Remove duplicates first
+            conn.execute("DELETE FROM bookmarks WHERE surah=? AND ayah=?", (surah, ayah))
+            conn.execute("INSERT INTO bookmarks (surah, ayah) VALUES (?, ?)", (surah, ayah))
+            # Keep only 1000 most recent
+            conn.execute("""
+                DELETE FROM bookmarks 
+                WHERE id NOT IN (
+                    SELECT id 
+                    FROM bookmarks 
+                    ORDER BY timestamp DESC 
+                    LIMIT 1500
+                )
+            """)
+
+    def get_all_bookmarks(self, search_engine):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT surah, ayah, timestamp 
+                FROM bookmarks 
+                ORDER BY timestamp DESC
+            """)
+            return [{
+                'surah': row[0],
+                'ayah': row[1],
+                'timestamp': row[2],
+                'surah_name': search_engine.get_chapter_name(row[0])
+            } for row in cursor.fetchall()]
+
+    def delete_bookmark(self, surah, ayah):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("DELETE FROM bookmarks WHERE surah=? AND ayah=?", (surah, ayah))
 
 
 def get_default_audio_directory():
@@ -301,6 +349,11 @@ class QuranListModel(QtCore.QAbstractListModel):
         super().__init__(parent)
         self.results = results or []
         self._displayed_results = 0
+        self.loading_complete.connect(self.handle_loading_complete, QtCore.Qt.UniqueConnection)
+
+    def handle_loading_complete(self):
+        # Handle any final loading tasks
+        pass
 
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid() or index.row() >= len(self.results):
@@ -335,19 +388,16 @@ class QuranListModel(QtCore.QAbstractListModel):
             QtCore.QTimer.singleShot(100, lambda: self.load_remaining_results())
 
     def load_remaining_results(self):
+        """Force load next chunk immediately"""
         remaining = len(self.results) - self._displayed_results
         if remaining > 0:
-            batch_size = min(50, remaining)
+            batch_size = min(100, remaining)
             self.beginInsertRows(QtCore.QModelIndex(),
                                self._displayed_results,
                                self._displayed_results + batch_size - 1)
             self._displayed_results += batch_size
             self.endInsertRows()
-
-            if self._displayed_results < len(self.results):
-                QtCore.QTimer.singleShot(50, self.load_remaining_results)
-            else:
-                self.loading_complete.emit()  # Emit signal when done
+            self.loading_complete.emit()
 
 
 # =============================================================================
@@ -525,6 +575,133 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         doc.setHtml(self._format_text(result, self.version))
         doc.setTextWidth(option.rect.width() - 20)
         return QSize(int(doc.idealWidth()) + 20, int(doc.size().height()))
+
+
+class BookmarkModel(QtCore.QAbstractListModel):
+    def __init__(self):
+        super().__init__()
+        self._bookmarks = []
+        self._loaded_count = 0
+        self.chunk_size = 100  # Items per chunk
+        self.load_timer = QtCore.QTimer()
+        self.load_timer.timeout.connect(self.load_next_chunk)
+
+    def rowCount(self, parent=QtCore.QModelIndex()):
+        return self._loaded_count
+
+    def data(self, index, role=QtCore.Qt.DisplayRole):
+        if not index.isValid() or index.row() >= self._loaded_count:
+            return None
+            
+        bm = self._bookmarks[index.row()]
+        
+        if role == QtCore.Qt.DisplayRole:
+            return f"""
+                <div style='font-family: Amiri; font-size: 14pt'>
+                    <b>{bm['surah_name']} - الآية {bm['ayah']}</b><br>
+                    <span style='color: #666; font-size: 12pt'>
+                        {bm['timestamp'][:16]}
+                    </span>
+                </div>
+            """
+        if role == QtCore.Qt.UserRole:
+            return bm
+        return None
+
+    def load_bookmarks(self, bookmarks):
+        self.beginResetModel()
+        self._bookmarks = bookmarks
+        self._loaded_count = 0
+        self.endResetModel()
+        self.load_timer.start(0)  # Start loading immediately
+        self.layoutChanged.emit()
+
+    def load_next_chunk(self):
+        if self._loaded_count >= len(self._bookmarks):
+            self.load_timer.stop()
+            return
+            
+        remaining = len(self._bookmarks) - self._loaded_count
+        chunk = min(self.chunk_size, remaining)
+        
+        self.beginInsertRows(QtCore.QModelIndex(), 
+                           self._loaded_count, 
+                           self._loaded_count + chunk - 1)
+        self._loaded_count += chunk
+        self.endInsertRows()
+
+
+class BookMarksDelegate(QtWidgets.QStyledItemDelegate):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.doc_cache = OrderedDict()
+        self.max_cache_size = 100
+
+    def paint(self, painter, option, index):
+        painter.save()
+        
+        # Setup style options
+        option = QtWidgets.QStyleOptionViewItem(option)
+        self.initStyleOption(option, index)
+        
+        # Use style's drawing capabilities
+        style = option.widget.style() if option.widget else QtWidgets.QApplication.style()
+        
+        # Draw background
+        style.drawPrimitive(QtWidgets.QStyle.PE_PanelItemViewItem, option, painter, option.widget)
+        
+        # Setup HTML document
+        doc = QtGui.QTextDocument()
+        doc.setHtml(option.text)
+        doc.setDocumentMargin(2)
+        
+        # Set text color based on state
+        if option.state & QtWidgets.QStyle.State_Selected:
+            doc.setDefaultStyleSheet(f"body {{ color: {option.palette.highlightedText().color().name()}; }}")
+        else:
+            doc.setDefaultStyleSheet(f"body {{ color: {option.palette.text().color().name()}; }}")
+        
+        # Calculate positioning
+        text_rect = style.subElementRect(QtWidgets.QStyle.SE_ItemViewItemText, option, option.widget)
+        painter.translate(text_rect.topLeft())
+        doc.setTextWidth(text_rect.width())
+        doc.drawContents(painter)
+        
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        if not index.isValid():
+            return QtCore.QSize(0, 0)
+        
+        # Use timestamp + surah + ayah as unique cache key
+        bm_data = index.data(Qt.UserRole)
+        cache_key = f"{bm_data['timestamp']}-{bm_data['surah']}-{bm_data['ayah']}"
+        
+        # Return cached size if available
+        if cache_key in self.doc_cache:
+            return self.doc_cache[cache_key]
+        
+        # Calculate new size
+        doc = QtGui.QTextDocument()
+        doc.setHtml(index.data(Qt.DisplayRole))
+        doc.setDocumentMargin(2)
+        doc.setTextWidth(option.rect.width() - 20)
+        
+        size = QtCore.QSize(
+            int(doc.idealWidth()) + 20,
+            int(doc.size().height()) + 8
+        )
+        
+        # Manage cache size
+        if len(self.doc_cache) >= self.max_cache_size:
+            self.doc_cache.popitem(last=False)  # Remove oldest entry
+        self.doc_cache[cache_key] = size
+        
+        return size
+
+    def clear_cache(self):
+        self.doc_cache.clear()
+
 
 class DetailView(QtWidgets.QWidget):
     backRequested = QtCore.pyqtSignal()
@@ -961,6 +1138,15 @@ class AyahSelectorDialog(QtWidgets.QDialog):
     def load_new_course(self):
         self.current_course_id, course = self.notes_manager.get_new_course()
         self.load_course(course)
+    
+    def load_course_by_id(self, course_id):
+        """Load a course by its ID"""
+        courses = self.notes_manager.get_all_courses()
+        for c in courses:
+            if c[0] == course_id:
+                self.current_course_id = c[0]
+                self.load_course({'title': c[1], 'items': c[2]})
+                break
 
     def load_previous_course(self):
         self.current_course_id, course = self.notes_manager.get_previous_course(self.current_course_id)
@@ -1048,7 +1234,7 @@ class CourseSelectionDialog(QtWidgets.QDialog):
 
     def init_ui(self):
         self.setWindowTitle("Add to Course")
-        self.resize(400, 300)
+        self.resize(400, 400)
         
         layout = QtWidgets.QVBoxLayout()
         
@@ -1057,15 +1243,39 @@ class CourseSelectionDialog(QtWidgets.QDialog):
         self.course_list.itemDoubleClicked.connect(self.accept)
         layout.addWidget(self.course_list)
         
-        # Button box
-        button_box = QtWidgets.QDialogButtonBox(
+        # Button layout
+        button_layout = QtWidgets.QHBoxLayout()
+        
+        # New Course button
+        self.new_btn = QtWidgets.QPushButton("New Course")
+        self.new_btn.clicked.connect(self.create_new_course)
+        button_layout.addWidget(self.new_btn)
+        
+        # Spacer
+        button_layout.addStretch()
+        
+        # Dialog buttons
+        self.button_box = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
         )
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        button_layout.addWidget(self.button_box)
         
+        layout.addLayout(button_layout)
         self.setLayout(layout)
+
+    def create_new_course(self):
+        """Create a new course and refresh the list"""
+        new_id = self.notes_manager.create_new_course()
+        self.load_courses()
+        
+        # Select the new course
+        for i in range(self.course_list.count()):
+            item = self.course_list.item(i)
+            if item.data(Qt.UserRole) == new_id:
+                self.course_list.setCurrentItem(item)
+                break
 
     def load_courses(self):
         self.course_list.clear()
@@ -1080,6 +1290,121 @@ class CourseSelectionDialog(QtWidgets.QDialog):
         if selected:
             return selected.data(Qt.UserRole)
         return None
+            
+
+class BookmarkDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.setWindowTitle("الآيات المرجعية")
+        self.resize(600, 400)
+        self.setWindowModality(QtCore.Qt.NonModal)
+        
+        # Create model and delegate
+        self.model = BookmarkModel()
+        self.delegate = BookMarksDelegate()
+        
+        # Setup UI
+        self.list_view = QtWidgets.QListView()
+        self.list_view.setItemDelegate(self.delegate)
+        self.list_view.setModel(self.model)
+        self.list_view.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.list_view.setFocusPolicy(QtCore.Qt.StrongFocus)
+        self.list_view.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.list_view.setFocus()
+        self.list_view.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollPerPixel)
+        self.list_view.verticalScrollBar().setSingleStep(20)
+        self.list_view.setStyleSheet("""
+            QListView {
+                show-decoration-selected: 1;
+            }
+            QListView::item {
+                padding-right: 25px;
+            }
+            QListView::item:selected {
+                background: palette(highlight);
+                color: palette(highlighted-text);
+            }
+            QScrollBar:vertical {
+                width: 12px;
+            }
+        """)
+
+        # Connect scrollbar to load more
+        self.list_view.verticalScrollBar().valueChanged.connect(
+            self.check_scroll_position
+        )
+        
+        # Buttons
+        self.remove_btn = QtWidgets.QPushButton("حذف المحدد")
+        self.close_btn = QtWidgets.QPushButton("إغلاق")
+        
+        # Layout
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(self.list_view)
+        
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.addWidget(self.remove_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.close_btn)
+        layout.addLayout(btn_layout)
+        
+        # Connections
+        self.close_btn.clicked.connect(self.hide)
+        self.remove_btn.clicked.connect(self.remove_selected)
+        self.list_view.doubleClicked.connect(self.load_and_close)
+
+        self.list_view.installEventFilter(self)
+
+
+    def check_scroll_position(self):
+        if self.model._loaded_count < len(self.model._bookmarks):
+            self.model.load_next_chunk()
+
+    def eventFilter(self, source, event):
+        if source is self.list_view and event.type() == QtCore.QEvent.KeyPress:
+            if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+                self.load_and_close()
+                return True
+            elif event.key() == QtCore.Qt.Key_Delete:
+                self.remove_selected()
+                return True
+            elif event.key() in (QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
+                # Allow default navigation
+                return False
+        return super().eventFilter(source, event)
+    
+    def showEvent(self, event):
+        self.load_bookmarks()
+        # Auto-select first item if exists
+        if self.model.rowCount() > 0:
+            index = self.model.index(0)
+            self.list_view.setCurrentIndex(index)
+
+    def load_bookmarks(self):
+        bookmarks = self.parent.notes_manager.get_all_bookmarks(self.parent.search_engine)
+        self.model.load_bookmarks(bookmarks)
+        # Show first items immediately
+        self.model._loaded_count = min(50, len(bookmarks))
+        self.model.layoutChanged.emit()
+
+    def load_and_close(self):
+        self.parent.load_selected_bookmark()
+        self.hide()
+
+    def remove_selected(self):
+        selected = self.list_view.selectionModel().selectedIndexes()
+        if not selected:
+            return
+            
+        # Remove in reverse order to preserve indexes
+        for index in sorted(selected, reverse=True):
+            bm = self.model.data(index, Qt.UserRole)
+            self.parent.notes_manager.delete_bookmark(bm['surah'], bm['ayah'])
+            self.model.beginRemoveRows(QtCore.QModelIndex(), index.row(), index.row())
+            del self.model._bookmarks[index.row()]
+            self.model.endRemoveRows()
+
 
 # =============================================================================
 # STEP 4: Main application window
@@ -1091,6 +1416,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.setWindowIcon(QtGui.QIcon(icon_path))
         self.search_engine = QuranSearch()
         self.ayah_selector = None
+        self.bookmark_dialog = None
         self.current_detail_result = None
         self._status_msg = ""
         self.current_surah = 0
@@ -1103,6 +1429,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.playing_range_max = 0
         self.results_count_int = 0
         self.playing_ayah_range = False
+        self.pending_scroll = None  
+        self.scroll_retries = 0
+        self.MAX_SCROLL_RETRIES = 5
 
         self.notes_manager = NotesManager()
 
@@ -1116,6 +1445,11 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.player = QMediaPlayer()  # For audio playback
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
 
+    def __del__(self):
+        try:
+            self.model.loading_complete.disconnect(self.handle_pending_scroll)
+        except:
+            pass
 
     def init_ui(self):
         # Create search bar widgets.
@@ -1157,6 +1491,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.splitter = QtWidgets.QSplitter(Qt.Horizontal)
         self.results_view = QtWidgets.QListView()
         self.model = QuranListModel()
+        self.model.loading_complete.connect(self.handle_pending_scroll, QtCore.Qt.UniqueConnection)
         self.results_view.setModel(self.model)
         self.delegate = QuranDelegate(parent=self.results_view)
         self.results_view.setItemDelegate(self.delegate)
@@ -1242,7 +1577,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+A"), self.results_view, activated=self.play_current_surah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+B"), self, activated=self.backto_current_surah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+H"), self, activated=self.show_help_dialog)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+J"), self, activated=self.load_surah_from_current_ayah)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+J"), self, activated=self.handle_ctrlj)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+K"), self, activated=self.load_surah_from_current_playback)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+N"), self, activated=self.new_note)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+E"), self, activated=self.export_notes)
@@ -1253,7 +1588,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Left"), self, activated=self.navigate_surah_left)
         QtWidgets.QShortcut(QtGui.QKeySequence("Right"), self, activated=self.navigate_surah_right)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+C"), self, activated=self.add_ayah_to_course)
-
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+M"), self, activated=self.show_bookmarks)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+B"), self, activated=self.bookmark_current_ayah)
 
 
     def new_note(self):
@@ -1328,6 +1664,11 @@ class QuranBrowser(QtWidgets.QMainWindow):
         audio_dir_action = QtWidgets.QAction("Set Audio Directory", self)
         audio_dir_action.triggered.connect(self.choose_audio_directory)
         menu.addAction(audio_dir_action)
+
+        # bookmark action
+        bookmark_action = QtWidgets.QAction("Bookmark Manager", self)
+        bookmark_action.triggered.connect(self.show_bookmarks)
+        menu.addAction(bookmark_action)
         # Add Export/Import actions
         export_action = QtWidgets.QAction("Export Notes", self)
         export_action.triggered.connect(self.export_notes)
@@ -1509,6 +1850,18 @@ class QuranBrowser(QtWidgets.QMainWindow):
                     result['text_simplified'] = bullet + result['text_simplified']
                     result['text_uthmani'] = bullet + result['text_uthmani']
             self.update_results(results, f"Surah {surah} (Automatic Selection)")
+            self.pending_scroll = (surah, selected_ayah)
+            self.scroll_retries = 0
+            try:
+                self.model.loading_complete.disconnect(self.handle_pending_scroll)
+            except TypeError:
+                pass  # No connection existed
+            
+            # Create fresh connection
+            self.model.loading_complete.connect(
+                self.handle_pending_scroll, 
+                QtCore.Qt.UniqueConnection
+            )
         except Exception as e:
             logging.exception("Error loading surah")
             self.showMessage("Error loading surah", 3000)
@@ -1517,8 +1870,6 @@ class QuranBrowser(QtWidgets.QMainWindow):
         # Show the results view.
         self.show_results_view()
 
-        # Scroll to the specified ayah.
-        self._scroll_to_ayah(surah, selected_ayah)
 
     def navigate_surah_left(self):
         current_index = self.surah_combo.currentIndex()
@@ -1608,6 +1959,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.result_count.setText(f"Found {self.results_count_int} results.")
         if results:
             self.results_view.setFocus()
+        # Force immediate scroll check
+        QtCore.QTimer.singleShot(500, self.handle_pending_scroll)
 
     def show_detail_view(self, index):
         if isinstance(index, QtCore.QModelIndex):
@@ -1876,30 +2229,45 @@ class QuranBrowser(QtWidgets.QMainWindow):
             # Delay a bit to ensure the player is ready for the next file.
             QTimer.singleShot(100, self.play_next_file)
 
-    def _scroll_to_ayah(self, surah, ayah):
-        """
-        Search the model for a result matching the given surah and ayah.
-        If found, select and scroll to that item.
-        Returns True if a match was found, otherwise False.
-        """
-        model = self.model
-        found = False
-        for row in range(model.rowCount()):
-            index = model.index(row, 0)
-            result = model.data(index, Qt.UserRole)
-            if result:
-                try:
-                    res_surah = int(result.get('surah'))
-                    res_ayah = int(result.get('ayah'))
-                except Exception:
-                    continue
 
-                if res_surah == surah and res_ayah == ayah:
-                    self.results_view.setCurrentIndex(index)
-                    self.results_view.scrollTo(index, QtWidgets.QAbstractItemView.PositionAtCenter)
-                    found = True
-                    break
-        return found
+    def handle_pending_scroll(self):
+        if not self.pending_scroll:
+            return
+            
+        surah, ayah = self.pending_scroll
+        found = self._scroll_to_ayah(surah, ayah)
+        
+        if not found and self.scroll_retries < self.MAX_SCROLL_RETRIES:
+            self.scroll_retries += 1
+            # Load more results and try again
+            self.model.load_remaining_results()
+            QtCore.QTimer.singleShot(100, self.handle_pending_scroll)
+        else:
+            self.pending_scroll = None
+            self.scroll_retries = 0
+            try:
+                self.model.loading_complete.disconnect(self.handle_pending_scroll)
+            except TypeError:
+                pass 
+
+    def _scroll_to_ayah(self, surah, ayah):
+        """Enhanced scroll function with progressive loading"""
+        # First try existing items
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            result = self.model.data(index, Qt.UserRole)
+            if (result['surah'] == surah and 
+                result['ayah'] == ayah):
+                self.results_view.setCurrentIndex(index)
+                self.results_view.scrollTo(index, 
+                    QtWidgets.QAbstractItemView.PositionAtCenter)
+                return True
+                
+        # If not found, check if more results need loading
+        if self.model._displayed_results < len(self.model.results):
+            self.model.load_remaining_results()
+            
+        return False
 
 
     def stop_playback(self):
@@ -1963,7 +2331,6 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.play_next_file()  # This method will chain playback for the sequence.
 
     def add_ayah_to_course(self):
-        # Get selected ayah
         index = self.results_view.currentIndex()
         if not index.isValid():
             self.showMessage("No verse selected", 3000)
@@ -1977,19 +2344,13 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.showMessage("Invalid verse data", 3000)
             return
 
-        # Check for existing courses
-        courses = self.notes_manager.get_all_courses()
-        if not courses:
-            # Create new course if none exist
-            new_course_id = self.notes_manager.create_new_course()
-            courses = self.notes_manager.get_all_courses()
-
-        # Show course selection dialog
         dialog = CourseSelectionDialog(self.notes_manager, self)
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             course_id = dialog.get_selected_course()
             if course_id:
                 self._add_to_course(course_id, surah, ayah)
+                self.show_ayah_selector()
+                self.ayah_selector.load_course_by_id(course_id)
 
     def _add_to_course(self, course_id, surah, ayah):
         # Get existing course data
@@ -2018,14 +2379,54 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.notes_manager.save_course(course_id, title, updated_items)
         self.showMessage(f"Added to course: {title}", 3000)
 
-        # Refresh selector if open
-        if self.ayah_selector and self.ayah_selector.isVisible():
-            self.ayah_selector.load_course({
-                'title': title,
-                'items': updated_items
-            })
 
+    def bookmark_current_ayah(self):
+        index = self.results_view.currentIndex()
+        if index.isValid():
+            result = self.model.data(index, Qt.UserRole)
+            if result:
+                self.notes_manager.add_bookmark(result['surah'], result['ayah'])
+                self.status_bar.showMessage("تم حفظ الآية في المرجعية", 2000)
 
+    def show_bookmarks(self):
+        if not hasattr(self, 'bookmark_dialog') or not self.bookmark_dialog:
+            self.bookmark_dialog = BookmarkDialog(self)
+            self.bookmark_dialog.list_view.doubleClicked.connect(self.load_and_close_dialog)
+        
+        self.bookmark_dialog.show()
+        self.bookmark_dialog.raise_()
+        self.bookmark_dialog.activateWindow()
+
+    def load_and_close_dialog(self):
+        self.load_selected_bookmark()
+        self.bookmark_dialog.hide()
+
+    def load_selected_bookmark(self):
+        index = self.bookmark_dialog.list_view.currentIndex()
+        if index.isValid():
+            bookmark = self.bookmark_dialog.model.data(index, QtCore.Qt.UserRole)
+            self.load_surah_from_current_ayah(
+                surah=bookmark['surah'],
+                selected_ayah=bookmark['ayah']
+            )
+
+    def handle_ctrlj(self):
+        index = self.results_view.currentIndex()
+        if not index.isValid():
+            self.showMessage("No verse selected", 2000)
+            return
+
+        result = self.model.data(index, Qt.UserRole)
+        try:
+            surah = int(result.get('surah'))
+            selected_ayah = int(result.get('ayah'))
+        except Exception as e:
+            self.showMessage("Invalid surah/ayah information", 3000)
+            return
+        self.load_surah_from_current_ayah(
+            surah=surah,
+            selected_ayah=selected_ayah
+        )
 
     def toggle_version(self):
         current = self.version_combo.currentIndex()
