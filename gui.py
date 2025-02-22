@@ -987,6 +987,7 @@ class NotesWidget(QtWidgets.QWidget):
 class AyahSelectorDialog(QtWidgets.QDialog):
     play_requested = QtCore.pyqtSignal(int, int, int)
     search_requested = QtCore.pyqtSignal(str)
+    PLACEHOLDER_TEXT = "Enter 'a surah start [end]' or :  \n 's search terms' help: Ctrl+H"
 
     def __init__(self, notes_manager, parent=None):
         super().__init__(parent)
@@ -998,6 +999,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         # Connect the itemChanged signal so edits are handled properly
         self.model.itemChanged.connect(self.on_item_changed)
         self.list_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
+        self.list_view.doubleClicked.connect(self.on_double_click)
         self.load_new_course()
 
         # Add shortcuts for navigation (left/right arrow keys)
@@ -1005,6 +1007,8 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         self.shortcut_prev.activated.connect(self._handle_prev_shortcut)
         self.shortcut_next = QtWidgets.QShortcut(QtGui.QKeySequence("Right"), self)
         self.shortcut_next.activated.connect(self._handle_next_shortcut)
+        
+        self.load_previous_course_and_focus()
         
 
     def init_ui(self):
@@ -1028,7 +1032,8 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         self.list_view = QtWidgets.QListView()
         self.list_view.setModel(self.model)
         self.list_view.setEditTriggers(
-            QtWidgets.QAbstractItemView.DoubleClicked | QtWidgets.QAbstractItemView.EditKeyPressed
+            QtWidgets.QAbstractItemView.DoubleClicked | 
+            QtWidgets.QAbstractItemView.EditKeyPressed 
         )
         self.list_view.installEventFilter(self)
         layout.addWidget(self.list_view)
@@ -1045,21 +1050,56 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         self.status_label = QtWidgets.QLabel("")
         layout.addWidget(self.status_label)
 
-        # Custom button layout: Save on the left, OK on the right
+        # Custom button layout: Save - New - OK
         button_layout = QtWidgets.QHBoxLayout()
         self.save_button = QtWidgets.QPushButton("Save")
+        self.new_button = QtWidgets.QPushButton("New")  # Add new button
         ok_button = QtWidgets.QPushButton("OK")
+        
         button_layout.addWidget(self.save_button)
-        button_layout.addStretch()  # Pushes OK button to the right
+        button_layout.addWidget(self.new_button)       # Add New button
+        button_layout.addStretch()                     # Pushes OK to right
         button_layout.addWidget(ok_button)
+        
         layout.addLayout(button_layout)
-        # Connect buttons:
+
+        # Connect buttons
         self.save_button.clicked.connect(self.save_course)
+        self.new_button.clicked.connect(self.create_new_course)  # New connection
         ok_button.clicked.connect(self.accept)
 
         # Navigation button connections using helper functions for focus
         self.prev_button.clicked.connect(self.load_previous_course_and_focus)
         self.next_button.clicked.connect(self.load_next_course_and_focus)
+
+    def on_double_click(self, index):
+        """Handle double click to start editing"""
+        if index.isValid():
+            self.start_editing(index)
+
+    def start_editing(self, index=None):
+        """Safe editing with existence check"""
+        if not index:
+            index = self.list_view.currentIndex()
+        
+        if index.isValid():
+            # Verify item still exists in model
+            if index.row() >= self.model.rowCount():
+                return
+                
+            item = self.model.itemFromIndex(index)
+            if item:  # Additional null check
+                current_text = item.text().strip()
+                
+                # Clear placeholder if needed
+                if current_text == self.PLACEHOLDER_TEXT:
+                    self.model.blockSignals(True)
+                    item.setText("")
+                    item.setForeground(QtGui.QColor(self.palette().text().color()))
+                    self.model.blockSignals(False)
+                
+                # Start editing only if item exists
+                self.list_view.edit(index)
 
     def load_previous_course_and_focus(self):
         self.load_previous_course()
@@ -1077,14 +1117,29 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         if self.next_button.isEnabled():
             self.load_next_course_and_focus()
 
+    def create_new_course(self):
+        """Handle creation of new empty course"""
+        # Create new course through manager
+        new_id = self.notes_manager.create_new_course()
+        
+        # Load the newly created course
+        self.current_course_id = new_id
+        self.load_new_course()
+        
+        # Update UI
+        self.course_input.clear()
+        self.update_status("New course created")
+        self.update_navigation_buttons()
+        
     def update_status(self, message):
         self.status_label.setText(message)
 
     def add_empty_item(self):
-        """Append an empty, editable item to the model."""
-        empty_item = QtGui.QStandardItem("")
-        empty_item.setEditable(True)
-        self.model.appendRow(empty_item)
+        """Append an empty, editable item with placeholder text"""
+        item = QtGui.QStandardItem(self.PLACEHOLDER_TEXT)
+        item.setEditable(True)
+        item.setForeground(QtGui.QColor(Qt.gray))
+        self.model.appendRow(item)
 
     def ensure_extra_row(self):
         """Ensure there is always an extra empty row at the bottom."""
@@ -1092,7 +1147,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
             self.add_empty_item()
         else:
             last_item = self.model.item(self.model.rowCount() - 1)
-            if last_item.text().strip() != "":
+            if last_item.text().strip() != "" and last_item.text().strip() != self.PLACEHOLDER_TEXT:
                 self.add_empty_item()
 
     def remove_item(self, row):
@@ -1101,6 +1156,16 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         self.model.removeRow(row)
         self.model.blockSignals(False)
         self.ensure_extra_row()
+
+    def safe_remove_item(self, row):
+        """Safely remove item after validation"""
+        try:
+            # Check if row still exists
+            if row < self.model.rowCount():
+                self.remove_item(row)
+                self.ensure_extra_row()
+        except Exception as e:
+            print(f"Error removing item: {str(e)}")
 
     def on_selection_changed(self, selected, deselected):
         # For newly selected items, update search items' text to include the query.
@@ -1130,36 +1195,65 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         text = item.text().strip()
         row = self.model.indexFromItem(item).row()
 
-        # If text is empty, remove it
+        # Handle placeholder text
+        if text == self.PLACEHOLDER_TEXT:
+            text = ""
         if text == "":
-            QtCore.QTimer.singleShot(0, lambda r=row: self.remove_item(r))
+            QtCore.QTimer.singleShot(0, lambda r=row: self.safe_remove_item(r))
             return
 
         # Validate input
         parts = text.split()
-        if parts[0].lower() == "a":
-            if len(parts) not in (3, 4):
-                self.update_status("Invalid format. Use 'a surah ayah' or 'a surah start end'.")
-                return
-            try:
-                surah = int(parts[1])
-                start = int(parts[2])
-                end = int(parts[3]) if len(parts) == 4 else start
-                chapter_name = self.parent().search_engine.get_chapter_name(surah)
-                formatted = f"{chapter_name} آية {start}-{end}" if start != end else f"{chapter_name} آية {start}"
-                item.setText(formatted)
-                item.setData({'type': 'ayah', 'surah': surah, 'start': start, 'end': end}, Qt.UserRole)
-                self.update_status("Valid input.")
-            except ValueError:
-                self.update_status("Invalid ayah numbers.")
-        elif parts[0].lower() == "s":
-            item.setText("بحث")
-            item.setData({'type': 'search', 'query': " ".join(parts[1:])}, Qt.UserRole)
-            self.update_status("Valid input.")
-        else:
-            self.update_status("Invalid input. Use 'a' or 's' as prefixes.")
+        if len(parts) == 0:
+            return
+
+        try:
+            if parts[0].lower() == "a":
+                if len(parts) not in (3, 4):
+                    self.update_status("Invalid format. Use 'a surah ayah' or 'a surah start end'.")
+                    return
+
+                self.model.blockSignals(True)
+                try:
+                    surah = int(parts[1])
+                    start = int(parts[2])
+                    end = int(parts[3]) if len(parts) == 4 else start
+                    chapter_name = self.parent().search_engine.get_chapter_name(surah)
+                    formatted = f"{chapter_name} آية {start}-{end}" if start != end else f"{chapter_name} آية {start}"
+                    item.setText(formatted)
+                    item.setData({'type': 'ayah', 'surah': surah, 'start': start, 'end': end}, Qt.UserRole)
+                    #item.setForeground(QtGui.QColor(self.palette().text().color()))
+                    self.update_status("Valid input.")
+                finally:
+                    self.model.blockSignals(False)
+            elif parts[0].lower() == "s":
+                self.model.blockSignals(True)
+                try:
+                    query = " ".join(parts[1:])
+                    item.setText("بحث")
+                    item.setData({'type': 'search', 'query': query}, Qt.UserRole)
+                    #item.setForeground(QtGui.QColor(self.palette().text().color()))
+                    self.update_status("Valid input.")
+                finally:
+                    self.model.blockSignals(False)
+            else:
+                self.update_status("Invalid input. Use 'a' or 's' as prefixes.")
+
+        except ValueError as e:
+            self.update_status(f"Invalid numbers: {str(e)}")
+        except Exception as e:
+            self.update_status(f"Error: {str(e)}")
 
         self.ensure_extra_row()
+
+    def handle_f2_edit(self):
+        index = self.list_view.currentIndex()
+        if index.isValid():
+            item = self.model.itemFromIndex(index)
+            if item.text() == self.PLACEHOLDER_TEXT:
+                item.setText("")
+                item.setForeground(QtGui.QColor(self.palette().text().color()))
+            self.list_view.edit(index)
 
     def eventFilter(self, source, event):
         if source is self.list_view and event.type() == QtCore.QEvent.KeyPress:
@@ -1167,15 +1261,30 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                 index = self.list_view.currentIndex()
                 if index.isValid():
                     item = self.model.itemFromIndex(index)
-                    if not item.text().strip():
+                    current_text = item.text().strip()
+                    
+                    if current_text == self.PLACEHOLDER_TEXT:
+                        # Clear placeholder and start editing
+                        self.model.blockSignals(True)
+                        item.setText("")
+                        item.setForeground(QtGui.QColor(self.palette().text().color()))
+                        self.model.blockSignals(False)
                         self.list_view.edit(index)
                         return True
+                    
+                    # # Validate before closing editor
+                    # self.validate_and_format_item(item)
+                    # return True
+                    
                     data = item.data(Qt.UserRole)
                     if data:
                         if data['type'] == 'ayah':
                             self.play_requested.emit(data['surah'], data['start'], data['end'])
                         elif data['type'] == 'search':
                             self.search_requested.emit(data['query'])
+                return True
+            elif event.key() == QtCore.Qt.Key_F2:
+                self.handle_f2_edit()
                 return True
             # Add Ctrl+Up/Down handling
             if event.modifiers() & QtCore.Qt.ControlModifier:
@@ -1277,21 +1386,32 @@ class AyahSelectorDialog(QtWidgets.QDialog):
     def save_course(self):
         title = self.course_input.text().strip() or f"درس رقم {self.current_course_id or 'NEW'}"
         items = []
+        has_valid_items = False
+        
         for row in range(self.model.rowCount()):
             item = self.model.item(row)
-            if item.text().strip():
-                user_data = item.data(Qt.UserRole)
-                if user_data is not None:
-                    items.append(json.dumps({"text": item.text(), "user_data": user_data}))
-                else:
-                    items.append(json.dumps({"text": item.text()}))
-        if items:
+            text = item.text().strip()
+            
+            # Skip placeholder text and empty items
+            if text == self.PLACEHOLDER_TEXT or not text:
+                continue
+                
+            # Track if we have any valid items
+            has_valid_items = True
+            
+            user_data = item.data(Qt.UserRole)
+            if user_data is not None:
+                items.append(json.dumps({"text": item.text(), "user_data": user_data}))
+            else:
+                items.append(json.dumps({"text": item.text()}))
+        
+        if has_valid_items:
             new_id = self.notes_manager.save_course(self.current_course_id, title, items)
             self.current_course_id = new_id
             self.update_status("Course saved.")
         else:
             self.notes_manager.delete_course(self.current_course_id)
-            self.update_status("Course deleted (empty list).")
+            self.update_status("Course deleted (no valid items).")
 
     def save_and_close(self):
         self.save_course()
@@ -1727,12 +1847,14 @@ class QuranBrowser(QtWidgets.QMainWindow):
         if new_size <= 38:
             self.delegate.update_font_size(new_size)
             self.results_view.reset()
+            self.showMessage(f"Font size: {self.delegate.base_font_size}",2000)
 
     def decrease_font_size(self):
         new_size = self.delegate.base_font_size - 1
         if new_size >= 10:
             self.delegate.update_font_size(new_size)
             self.results_view.reset()
+            self.showMessage(f"Font size: {self.delegate.base_font_size}",2000)
 
 
     def new_note(self):
@@ -1743,7 +1865,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         if self.detail_view.isVisible():
             self.detail_view.notes_widget.delete_note()
 
-    def showMessage(self, message, timeout=3000):
+    def showMessage(self, message, timeout=3000, bg="#4CAF50"):
         """Temporarily override the left status label"""
         # Cancel any pending reverts
         self.message_timer.stop()
@@ -1754,7 +1876,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             
         self.temporary_message_active = True
         self.result_count.setText(message)
-        self.result_count.setStyleSheet("background: #4CAF50; color: black;")  # Visual distinction
+        self.result_count.setStyleSheet(f"background: {bg}; color: black;")  # Visual distinction
         
         if timeout > 0:
             self.message_timer.start(timeout)
@@ -1805,10 +1927,10 @@ class QuranBrowser(QtWidgets.QMainWindow):
                     self.playing_ayah_range = True
                     self.play_next_file()
                 else:
-                    self.showMessage("No audio files found for selection", 5000)
+                    self.showMessage("No audio files found for selection", 5000, bg="red")
         except Exception as e:
             logging.error(f"Error playing ayah range: {str(e)}")
-            self.showMessage("Error playing selection", 5000)
+            self.showMessage("Error playing selection", 5000, bg="red")
 
     def setup_menu(self):
         menu = self.menuBar().addMenu("&Menu")
@@ -1825,6 +1947,12 @@ class QuranBrowser(QtWidgets.QMainWindow):
         bookmark_action = QtWidgets.QAction("Bookmark Manager", self)
         bookmark_action.triggered.connect(self.show_bookmarks)
         menu.addAction(bookmark_action)
+
+        # bookmark action
+        course_action = QtWidgets.QAction("Course Manager", self)
+        course_action.triggered.connect(self.show_ayah_selector)
+        menu.addAction(course_action)
+
         # Add Export/Import actions
         export_action = QtWidgets.QAction("Export Notes", self)
         export_action.triggered.connect(self.export_notes)
@@ -1873,7 +2001,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 self.notes_manager.export_to_csv(file_path)
                 self.showMessage(f"Notes exported to {file_path}", 5000)
             except Exception as e:
-                self.showMessage(f"Export failed: {str(e)}", 5000)
+                self.showMessage(f"Export failed: {str(e)}", 5000, bg="red")
 
     def import_notes(self):
         """Handles importing notes from a CSV file."""
@@ -1889,9 +2017,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 if self.detail_view.isVisible():
                     self.detail_view.notes_widget.load_notes()
             except ValueError as e:
-                self.showMessage(str(e), 7000)
+                self.showMessage(str(e), 7000, bg="red")
             except Exception as e:
-                self.showMessage(f"Import failed: {str(e)}", 7000)
+                self.showMessage(f"Import failed: {str(e)}", 7000, bg="red")
         if self.detail_view.isVisible():
             self.detail_view.notes_widget.load_notes()
 
@@ -1972,7 +2100,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.update_results(results, f"Surah {surah} (Automatic Selection)")
         except Exception as e:
             logging.exception("Error during surah selection")
-            self.showMessage("Error loading surah", 3000)
+            self.showMessage("Error loading surah", 3000, bg="red")
         self.show_results_view()
 
     def load_surah_from_current_ayah(self, surah=None, selected_ayah=None):
@@ -1985,7 +2113,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         if surah is None or selected_ayah is None:
             index = self.results_view.currentIndex()
             if not index.isValid():
-                self.showMessage("No verse selected", 2000)
+                self.showMessage("No verse selected", 2000, bg="red")
                 return
 
             result = self.model.data(index, Qt.UserRole)
@@ -1993,7 +2121,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 surah = int(result.get('surah'))
                 selected_ayah = int(result.get('ayah'))
             except Exception as e:
-                self.showMessage("Invalid surah/ayah information", 3000)
+                self.showMessage("Invalid surah/ayah information", 3000, bg="red")
                 return
 
         # Load the full surah using your search engine.
@@ -2020,7 +2148,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             )
         except Exception as e:
             logging.exception("Error loading surah")
-            self.showMessage("Error loading surah", 3000)
+            self.showMessage("Error loading surah", 3000, bg="red")
             return
 
         # Show the results view.
@@ -2070,7 +2198,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         query = self.search_input.text().strip()
         method = self.search_method_combo.currentText()
         if not query and method == "Text":
-            self.showMessage("Please enter a search query", 3000)
+            self.showMessage("Please enter a search query", 3000, bg="red")
             return
         self.search_input.update_history(query)
         self.showMessage("Searching...", 2000)
@@ -2092,7 +2220,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         # Start the search in a background thread.
         self.search_worker = SearchWorker(self.search_engine, method, query,parent=self)
         self.search_worker.results_ready.connect(self.handle_search_results)
-        self.search_worker.error_occurred.connect(lambda error: self.showMessage(f"Search error: {error}", 3000))
+        self.search_worker.error_occurred.connect(lambda error: self.showMessage(f"Search error: {error}", 3000, bg="red"))
         self.search_worker.start()
 
     def handle_search_results(self, results):
@@ -2155,7 +2283,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def handle_ctrlr(self):
         method = self.search_method_combo.currentText()
         if not method == "Surah FirstAyah LastAyah":
-            self.showMessage("Please select a range to repeat using 'Surah FirstAyah LastAyah' search method", 10000)
+            self.showMessage("Please select a range to repeat using 'Surah FirstAyah LastAyah' search method", 10000, bg="red")
             return
         self.playing_range = 1
         self.playing_range_max = self.results_count_int
@@ -2185,7 +2313,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         except Exception as e:
             logging.error(f"Error in handle_ctrlw: {str(e)}")
-            self.showMessage("Error changing search mode", 3000)
+            self.showMessage("Error changing search mode", 3000, bg="red")
     
     def handle_ctrlsw(self):
         """Handle Ctrl+shift+w: Set search method to Surah and focus search input"""
@@ -2204,7 +2332,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         except Exception as e:
             logging.error(f"Error in handle_ctrlsw: {str(e)}")
-            self.showMessage("Error changing search mode", 3000)
+            self.showMessage("Error changing search mode", 3000, bg="red")
 
     def handle_ctrls(self):
         if self.detail_view.isVisible():
@@ -2232,14 +2360,14 @@ class QuranBrowser(QtWidgets.QMainWindow):
         if surah is None or ayah is None:
             index = self.results_view.currentIndex()
             if not index.isValid():
-                self.showMessage("No verse selected", 7000)
+                self.showMessage("No verse selected", 7000, bg="red")
                 return
             result = self.model.data(index, Qt.UserRole)
             try:
                 surah = int(result.get('surah'))
                 ayah = int(result.get('ayah'))
             except Exception as e:
-                self.showMessage("Invalid verse data", 2000)
+                self.showMessage("Invalid verse data", 2000, bg="red")
                 return
 
         # Retrieve the audio directory from the INI file.
@@ -2254,7 +2382,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 self.player.play()
                 self.showMessage(f"Playing audio for Surah {surah}, Ayah {ayah}", 2000)
             else:
-                self.showMessage("Audio file not found", 3000)
+                self.showMessage("Audio file not found", 3000, bg="red")
             return
         # For sequence playback, store the surah and starting ayah.
         self.current_surah = int(surah)
@@ -2268,11 +2396,11 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 self.sequence_files.append(os.path.abspath(file_path))
             else:
                 # Optionally, notify that a file was not found and break out.
-                self.showMessage(f"Audio file not found: {file_path}", 2000)
+                self.showMessage(f"Audio file not found: {file_path}", 2000, bg="red")
                 break
 
         if not self.sequence_files:
-            self.showMessage("No audio files found for sequence", 3000)
+            self.showMessage("No audio files found for sequence", 3000, bg="red")
             return
 
         # Initialize sequence index and start playback.
@@ -2282,7 +2410,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def play_all_results(self):
         """Play all verses in the current search results list."""
         if not self.model.results:
-            self.showMessage("No results to play", 3000)
+            self.showMessage("No results to play", 3000, bg="red")
             return
 
         audio_dir = get_audio_directory()
@@ -2307,7 +2435,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 self.sequence_files.append(os.path.abspath(file_path))
                 self.sequence_rows.append(row)
             else:
-                self.showMessage(f"Audio not found: Surah {surah} Ayah {ayah}", 3000)
+                self.showMessage(f"Audio not found: Surah {surah} Ayah {ayah}", 3000, bg="red")
 
         if self.sequence_files:
             index = self.results_view.currentIndex()
@@ -2323,7 +2451,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.showMessage(f"Playing {len(self.sequence_files)} results...", 3000)
             self.play_next_file()
         else:
-            self.showMessage("No audio files found in results", 3000)
+            self.showMessage("No audio files found in results", 3000, bg="red")
 
     def play_next_file(self):
         """
@@ -2489,12 +2617,12 @@ class QuranBrowser(QtWidgets.QMainWindow):
         """
         # Ensure we are in results view.
         if not self.results_view.isVisible():
-            self.showMessage("Switch to results view to play current surah", 2000)
+            self.showMessage("Switch to results view to play current surah", 2000, bg="red")
             return
 
         index = self.results_view.currentIndex()
         if not index.isValid():
-            self.showMessage("No verse selected", 2000)
+            self.showMessage("No verse selected", 2000, bg="red")
             return
 
         result = self.model.data(index, Qt.UserRole)
@@ -2502,7 +2630,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             surah = int(result.get('surah'))
             selected_ayah = int(result.get('ayah'))
         except Exception as e:
-            self.showMessage("Invalid surah or ayah information", 2000)
+            self.showMessage("Invalid surah or ayah information", 2000, bg="red")
             return
 
         # Retrieve the audio directory from the INI file.
@@ -2519,7 +2647,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 break
 
         if not sequence_files:
-            self.showMessage("No audio files found for current surah", 3000)
+            self.showMessage("No audio files found for current surah", 3000, bg="red")
             return
 
         # Store the sequence and initialize the index.
@@ -2539,7 +2667,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def add_ayah_to_course(self):
         index = self.results_view.currentIndex()
         if not index.isValid():
-            self.showMessage("No verse selected", 3000)
+            self.showMessage("No verse selected", 3000, bg="red")
             return
             
         result = self.model.data(index, Qt.UserRole)
@@ -2547,7 +2675,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             surah = int(result['surah'])
             ayah = int(result['ayah'])
         except (KeyError, ValueError):
-            self.showMessage("Invalid verse data", 3000)
+            self.showMessage("Invalid verse data", 3000, bg="red")
             return
 
         dialog = CourseSelectionDialog(self.notes_manager, self)
@@ -2619,7 +2747,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def handle_ctrlj(self):
         index = self.results_view.currentIndex()
         if not index.isValid():
-            self.showMessage("No verse selected", 2000)
+            self.showMessage("No verse selected", 2000,bg="red")
             return
 
         result = self.model.data(index, Qt.UserRole)
@@ -2627,7 +2755,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             surah = int(result.get('surah'))
             selected_ayah = int(result.get('ayah'))
         except Exception as e:
-            self.showMessage("Invalid surah/ayah information", 3000)
+            self.showMessage("Invalid surah/ayah information", 3000, bg="red")
             return
         self.load_surah_from_current_ayah(
             surah=surah,
@@ -2694,7 +2822,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def show_help_dialog(self):
         help_file = Path(resource_path(os.path.join("help", "help_ar.html")))
         if not help_file.exists():
-            self.showMessage("Help file not found", 3000)
+            self.showMessage("Help file not found", 3000, bg="red")
             return
 
         # Create as persistent dialog
