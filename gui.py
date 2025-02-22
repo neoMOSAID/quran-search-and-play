@@ -546,6 +546,13 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         self.version = version
         self.query = ""
         self.highlight_color = "#4CAF5050"
+        self.settings = QSettings("MOSAID", "QuranSearch")
+        self.base_font_size = self.settings.value("resultFontSize", 16, type=int)
+
+    def update_font_size(self, new_size):
+        self.base_font_size = new_size
+        self.settings.setValue("resultFontSize", self.base_font_size)
+        self.sizeHintChanged.emit(QtCore.QModelIndex())  # Notify view of size changes
 
     def update_version(self, version):
         self.version = version
@@ -574,25 +581,26 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         painter.restore()
 
     def _format_text(self, result, version):
-        if not result:  # Add null check
-            return ""
-
         text = result.get(f"text_{version}", "")
         return f"""
-            <div dir="rtl" style="text-align:left;">
-                <div style="font-family: 'Amiri'; font-size: 16pt; margin: 5px;">
-                    {text}
-                    <span style="color: #006400; font-size: 14pt;">
-                        ({result.get('surah', '')}-{result.get('chapter', '')} {result.get('ayah', '')})
-                    </span>
-                </div>
+        <div dir="rtl" style="text-align:left;">
+            <div style="font-family: 'Amiri'; 
+                        font-size: {self.base_font_size}pt;
+                        margin: 5px;">
+                {text}
+                <span style="color: #006400; 
+                            font-size: {self.base_font_size - 2}pt;">
+                    ({result.get('surah', '')}-{result.get('chapter', '')} {result.get('ayah', '')})
+                </span>
             </div>
-            """
+        </div>
+        """
 
     def sizeHint(self, option, index):
         result = index.data(Qt.UserRole)
-        if not result:  # Handle null results
+        if not result:
             return QSize(0, 0)
+        
         doc = QtGui.QTextDocument()
         doc.setHtml(self._format_text(result, self.version))
         doc.setTextWidth(option.rect.width() - 20)
@@ -1614,23 +1622,38 @@ class QuranBrowser(QtWidgets.QMainWindow):
         # Status bar with result count and shortcuts.
         self.status_bar = QtWidgets.QStatusBar()
         self.setStatusBar(self.status_bar)
+        
+        # Create container widget
+        status_container = QtWidgets.QWidget()
+        status_layout = QtWidgets.QHBoxLayout(status_container)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(10)
 
-        # Left widget: result count (no stretch)
+        # Left section (fixed width)
+        self.center_label = QtWidgets.QLabel()
+        self.center_label.setFixedWidth(250)
+        self.center_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        self.center_label.setTextFormat(QtCore.Qt.RichText)
+        self.center_label.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
+        self.center_label.setOpenExternalLinks(True)
+        status_layout.addWidget(self.center_label)
+        self.center_label.setText("© 2025 MOSAID, <a href='https://mosaid.xyz/quran-search'>https://mosaid.xyz</a>")
+
+        # Center section (fixed width)
         self.result_count = QtWidgets.QLabel()
-        self.status_bar.addWidget(self.result_count, 0)
+        self.result_count.setAlignment(QtCore.Qt.AlignCenter)
+        self.result_count.setFixedWidth(400)
+        status_layout.addWidget(self.result_count)
 
-        # Center widget: copyright message (stretch factor 1)
-        center_label = QtWidgets.QLabel("© 2025 MOSAID, <a href='https://mosaid.xyz/quran-search'>https://mosaid.xyz</a>")
-        center_label.setAlignment(QtCore.Qt.AlignCenter)
-        center_label.setTextFormat(QtCore.Qt.RichText)
-        center_label.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
-        center_label.setOpenExternalLinks(True)
-        self.status_bar.addWidget(center_label, 1)
+        # Right section (fixed width)
+        self.shortcuts_label = QtWidgets.QLabel()
+        self.shortcuts_label.setFixedWidth(250)
+        self.shortcuts_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        status_layout.addWidget(self.shortcuts_label)
+        self.shortcuts_label.setText("Help: Ctrl+H")
 
-        # Right widget: shortcuts info (no stretch)
-        shortcuts = QtWidgets.QLabel("Help: Ctrl+H")
-        shortcuts.setAlignment(QtCore.Qt.AlignRight)
-        self.status_bar.addWidget(shortcuts, 0)
+        # Add container to status bar
+        self.status_bar.addPermanentWidget(status_container, 1)
 
         # Set the central widget.
         self.setCentralWidget(central)
@@ -1688,6 +1711,22 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+C"), self, activated=self.add_ayah_to_course)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+M"), self, activated=self.show_bookmarks)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+B"), self, activated=self.bookmark_current_ayah)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+="), self, activated=self.increase_font_size)  # Ctrl++
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+-"), self, activated=self.decrease_font_size)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+MouseWheelUp"), self, activated=self.increase_font_size)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+MouseWheelDown"), self, activated=self.decrease_font_size)
+
+    def increase_font_size(self):
+        new_size = self.delegate.base_font_size + 1
+        if new_size <= 30:
+            self.delegate.update_font_size(new_size)
+            self.results_view.reset()
+
+    def decrease_font_size(self):
+        new_size = self.delegate.base_font_size - 1
+        if new_size >= 8:
+            self.delegate.update_font_size(new_size)
+            self.results_view.reset()
 
 
     def new_note(self):
