@@ -23,9 +23,6 @@ from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
 from PyQt5.QtCore import QStandardPaths, QSettings
 from PyQt5.QtGui import QColor, QDesktopServices
-from PyQt5.QtCore import QMetaType, QPersistentModelIndex
-
-#QMetaType.registerType('QList<QPersistentModelIndex>', lambda: list)
 
 from search import QuranSearch
 
@@ -301,14 +298,14 @@ class NotesManager:
             # Remove duplicates first
             conn.execute("DELETE FROM bookmarks WHERE surah=? AND ayah=?", (surah, ayah))
             conn.execute("INSERT INTO bookmarks (surah, ayah) VALUES (?, ?)", (surah, ayah))
-            # Keep only 1000 most recent
+            # Keep only 2500 most recent
             conn.execute("""
                 DELETE FROM bookmarks 
                 WHERE id NOT IN (
                     SELECT id 
                     FROM bookmarks 
                     ORDER BY timestamp DESC 
-                    LIMIT 1500
+                    LIMIT 2500
                 )
             """)
 
@@ -1034,12 +1031,6 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                 font-family: 'Amiri';
                 font-size: 14pt;
             }
-            QListView::item {
-                font-family: 'Amiri';
-                font-size: 14pt;
-                padding: 8px 0;
-                border-bottom: 1px solid #eee;
-            }
         """)
 
         # Status label (for validation and course messages)
@@ -1511,7 +1502,7 @@ class BookmarkDialog(QtWidgets.QDialog):
 
 
 # =============================================================================
-# STEP 4: Main application window
+# Main application window
 # =============================================================================
 class QuranBrowser(QtWidgets.QMainWindow):
     def __init__(self):
@@ -1530,6 +1521,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.playing_one = False
         self.playing_context = 0
         self.playing_range = 0
+        self.repeat_all = False
         self.playing_range_max = 0
         self.results_count_int = 0
         self.playing_ayah_range = False
@@ -1676,8 +1668,10 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+D"), self, activated=self.toggle_theme)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+P"), self, activated=self.handle_ctrlp)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+R"), self, activated=self.handle_ctrlr)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+R"), self, activated=self.handle_repeat_all_results)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+S"), self, activated=self.handle_ctrls)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+W"), self, activated=self.handle_ctrlw)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+W"), self, activated=self.handle_ctrlsw)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+A"), self.results_view, activated=self.play_current_surah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+B"), self, activated=self.backto_current_surah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+H"), self, activated=self.show_help_dialog)
@@ -2109,6 +2103,13 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.playing_range_max = self.results_count_int
         self.play_current(count=self.playing_range_max)
 
+    def handle_repeat_all_results(self):
+        """Handle repeating all results in a loop"""
+        self.repeat_all = True
+        #if not self.sequence_files:  # Only start playback if not already playing
+        self.play_all_results()
+        self.status_bar.showMessage("Repeating all results continuously", 3000)
+
     def handle_ctrlw(self):
         """Handle Ctrl+Z: Set search method to Surah and focus search input"""
         try:
@@ -2126,6 +2127,25 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         except Exception as e:
             logging.error(f"Error in handle_ctrlw: {str(e)}")
+            self.status_bar.showMessage("Error changing search mode", 3000)
+    
+    def handle_ctrlsw(self):
+        """Handle Ctrl+shift+w: Set search method to Surah and focus search input"""
+        try:
+            # Set search method to "Surah"
+            index = self.search_method_combo.findText("Surah FirstAyah LastAyah", QtCore.Qt.MatchFixedString)
+            if index >= 0:
+                self.search_method_combo.setCurrentIndex(index)
+
+            # Focus and select all text in search input
+            self.search_input.setFocus()
+            self.search_input.selectAll()
+
+            # Optional: Trigger search if needed
+            # self.search()
+
+        except Exception as e:
+            logging.error(f"Error in handle_ctrlsw: {str(e)}")
             self.status_bar.showMessage("Error changing search mode", 3000)
 
     def handle_ctrls(self):
@@ -2260,6 +2280,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
             current_ayah = int(os.path.basename(file_path)[3:6])
             chapter = self.search_engine.get_chapter_name(current_surah)
             self.status_msg = f"<span dir='rtl' style='text-align: right'> إستماع إلى الآية {current_ayah}   من سورة {chapter}  {self.current_sequence_index+1}/{maxx}</span>"
+            if self.repeat_all or self.playing_range:
+                self.status_msg += " repeating "
             # Continue playing the current surah.
             url = QUrl.fromLocalFile(file_path)
             self.player.setMedia(QMediaContent(url))
@@ -2270,6 +2292,24 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 self._scroll_to_ayah(current_surah, current_ayah)
             self.current_sequence_index += 1
         else:
+#             print(
+#                 f"""
+#                 self.playing_one : {self.playing_one}\n
+#                 self.playing_context: {self.playing_context}\n
+#                 self.playing_range: {self.playing_range}\n
+#                 self.playing_ayah_range: {self.playing_ayah_range}\n
+#                 self.current_surah : {self.current_surah }\n
+#                 self.current_start_ayah: {self.current_start_ayah}\n
+#                 self.current_sequence_index: {self.current_sequence_index}\n
+#                 self.repeat_all: {self.repeat_all}\n
+# ==============================================================================\n
+#                 """
+#             )
+            if self.repeat_all:
+                # Reset to start of sequence for repeating
+                self.current_sequence_index = 0
+                self.play_next_file()
+                return 
             if self.playing_one:
                 self.playing_one = False
                 return
@@ -2285,6 +2325,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
                     self.playing_range += 1
                 else:
                     self.playing_range = 1
+                    self.current_sequence_index = 0
+                self.play_next_file()
                 return
             if self.playing_ayah_range:
                 self.playing_ayah_range = False
@@ -2376,6 +2418,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
     def stop_playback(self):
         """Stop any current audio playback."""
+        self.repeat_all = False
         self.player.stop()
         self.status_bar.showMessage("Playback stopped", 2000)
 
@@ -2424,6 +2467,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         # Store the sequence and initialize the index.
         self.current_surah = surah
         self.sequence_files = sequence_files
+        self.playing_ayah_range = False
         self.current_start_ayah = 1  # Our sequence is built from ayah 1.
         # Set the current sequence index to the selected ayah (adjusted for 0-based indexing).
         self.current_sequence_index = selected_ayah -1
