@@ -1522,6 +1522,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.bookmark_dialog = None
         self.current_detail_result = None
         self._status_msg = ""
+        self.temporary_message_active = False
+        self.message_timer = QtCore.QTimer()
+        self.message_timer.timeout.connect(self.revert_status_message)
         self.current_surah = 0
         self.current_start_ayah = 0
         self.sequence_files = []
@@ -1654,7 +1657,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         # Add container to status bar
         self.status_bar.addPermanentWidget(status_container, 1)
-
+        
         # Set the central widget.
         self.setCentralWidget(central)
         # self.setWindowTitle("Quran Search")
@@ -1681,7 +1684,10 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.updatePermanentStatus()
 
     def updatePermanentStatus(self):
-        self.result_count.setText(f"{self.results_count_int} نتائج، {self._status_msg}")
+        if not self.temporary_message_active:
+            self.result_count.setText(f"{self.results_count_int} نتائج، {self._status_msg}")
+            self.result_count.setStyleSheet("")
+
 
     def setup_shortcuts(self):
         QtWidgets.QShortcut(QtGui.QKeySequence("Space"), self, activated=self.handle_space)
@@ -1718,13 +1724,13 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
     def increase_font_size(self):
         new_size = self.delegate.base_font_size + 1
-        if new_size <= 30:
+        if new_size <= 38:
             self.delegate.update_font_size(new_size)
             self.results_view.reset()
 
     def decrease_font_size(self):
         new_size = self.delegate.base_font_size - 1
-        if new_size >= 8:
+        if new_size >= 10:
             self.delegate.update_font_size(new_size)
             self.results_view.reset()
 
@@ -1737,15 +1743,28 @@ class QuranBrowser(QtWidgets.QMainWindow):
         if self.detail_view.isVisible():
             self.detail_view.notes_widget.delete_note()
 
-    def showMessage(self, message, timeout=7000):
-        # Save the current style
-        original_style = self.status_bar.styleSheet()
-        # Set an error style (red background)
-        self.status_bar.setStyleSheet("QStatusBar { background-color: red; }")
-        # Show the temporary message
-        self.status_bar.showMessage(message, timeout)
-        # After timeout, reset the style and restore permanent message
-        self.status_bar.setStyleSheet(original_style)
+    def showMessage(self, message, timeout=3000):
+        """Temporarily override the left status label"""
+        # Cancel any pending reverts
+        self.message_timer.stop()
+        
+        # Store current permanent text if not already in override
+        if not self.temporary_message_active:
+            self.original_style = self.result_count.styleSheet()
+            
+        self.temporary_message_active = True
+        self.result_count.setText(message)
+        self.result_count.setStyleSheet("background: #4CAF50; color: black;")  # Visual distinction
+        
+        if timeout > 0:
+            self.message_timer.start(timeout)
+
+    def revert_status_message(self):
+        """Revert to permanent status message"""
+        self.message_timer.stop()
+        self.temporary_message_active = False
+        self.status_msg = ""
+        self.result_count.setStyleSheet(self.original_style)
 
     def show_ayah_selector(self):
         if not self.ayah_selector:
@@ -1759,7 +1778,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.search()
 
     def play_ayah_range(self, surah, start, end):
-        #self.status_bar.showMessage(f"{surah}:{start}--{end}", 5000)
+        #self.showMessage(f"{surah}:{start}--{end}", 5000)
         try:
             results = self.search_engine.search_by_surah_ayah(surah, start, end)
             if results:
@@ -1786,10 +1805,10 @@ class QuranBrowser(QtWidgets.QMainWindow):
                     self.playing_ayah_range = True
                     self.play_next_file()
                 else:
-                    self.status_bar.showMessage("No audio files found for selection", 5000)
+                    self.showMessage("No audio files found for selection", 5000)
         except Exception as e:
             logging.error(f"Error playing ayah range: {str(e)}")
-            self.status_bar.showMessage("Error playing selection", 5000)
+            self.showMessage("Error playing selection", 5000)
 
     def setup_menu(self):
         menu = self.menuBar().addMenu("&Menu")
@@ -1852,7 +1871,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
             try:
                 self.notes_manager.export_to_csv(file_path)
-                self.status_bar.showMessage(f"Notes exported to {file_path}", 5000)
+                self.showMessage(f"Notes exported to {file_path}", 5000)
             except Exception as e:
                 self.showMessage(f"Export failed: {str(e)}", 5000)
 
@@ -1864,7 +1883,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             try:
                 imported, duplicates, errors = self.notes_manager.import_from_csv(file_path)
                 msg = f"Imported {imported} notes. Skipped {duplicates} duplicates. {errors} errors."
-                self.status_bar.showMessage(msg, 7000)
+                self.showMessage(msg, 7000)
 
                 # Refresh notes display if detail view is visible
                 if self.detail_view.isVisible():
@@ -1913,7 +1932,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             settings = QtCore.QSettings(config_file, QtCore.QSettings.IniFormat)
             settings.setValue("AudioDirectory", chosen_dir)
             settings.sync()  # Write changes immediately.
-            self.status_bar.showMessage(f"Audio directory set to: {chosen_dir}", 3000)
+            self.showMessage(f"Audio directory set to: {chosen_dir}", 3000)
 
 
     def closeEvent(self, event):
@@ -2054,7 +2073,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.showMessage("Please enter a search query", 3000)
             return
         self.search_input.update_history(query)
-        self.status_bar.showMessage("Searching...", 2000)
+        self.showMessage("Searching...", 2000)
 
         if (method == "Surah" and query.isdigit()) or method == "Surah FirstAyah LastAyah":
             try:
@@ -2147,7 +2166,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.repeat_all = True
         #if not self.sequence_files:  # Only start playback if not already playing
         self.play_all_results()
-        self.status_bar.showMessage("Repeating all results continuously", 3000)
+        self.showMessage("Repeating all results continuously", 3000)
 
     def handle_ctrlw(self):
         """Handle Ctrl+Z: Set search method to Surah and focus search input"""
@@ -2166,7 +2185,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         except Exception as e:
             logging.error(f"Error in handle_ctrlw: {str(e)}")
-            self.status_bar.showMessage("Error changing search mode", 3000)
+            self.showMessage("Error changing search mode", 3000)
     
     def handle_ctrlsw(self):
         """Handle Ctrl+shift+w: Set search method to Surah and focus search input"""
@@ -2185,7 +2204,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         except Exception as e:
             logging.error(f"Error in handle_ctrlsw: {str(e)}")
-            self.status_bar.showMessage("Error changing search mode", 3000)
+            self.showMessage("Error changing search mode", 3000)
 
     def handle_ctrls(self):
         if self.detail_view.isVisible():
@@ -2233,7 +2252,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 url = QUrl.fromLocalFile(os.path.abspath(audio_file))
                 self.player.setMedia(QMediaContent(url))
                 self.player.play()
-                self.status_bar.showMessage(f"Playing audio for Surah {surah}, Ayah {ayah}", 2000)
+                self.showMessage(f"Playing audio for Surah {surah}, Ayah {ayah}", 2000)
             else:
                 self.showMessage("Audio file not found", 3000)
             return
@@ -2301,7 +2320,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 except Exception as e:
                     pass
             self.playing_ayah_range = True
-            self.status_bar.showMessage(f"Playing {len(self.sequence_files)} results...", 3000)
+            self.showMessage(f"Playing {len(self.sequence_files)} results...", 3000)
             self.play_next_file()
         else:
             self.showMessage("No audio files found in results", 3000)
@@ -2394,10 +2413,10 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 self.surah_combo.setCurrentIndex(self.current_surah - 1)
                 self.sequence_files = new_sequence_files
                 self.current_sequence_index = 0
-                self.status_bar.showMessage(f"Moving to surah {self.current_surah}", 5000)
+                self.showMessage(f"Moving to surah {self.current_surah}", 5000)
                 self.play_next_file()  # Start playback of the new surah.
             else:
-                self.status_bar.showMessage(f"No audio files found for surah {self.current_surah}. Playback finished.", 2000)
+                self.showMessage(f"No audio files found for surah {self.current_surah}. Playback finished.", 2000)
                 self.sequence_files = []
                 self.current_sequence_index = 0
                 self.status_msg = ""
@@ -2459,7 +2478,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         """Stop any current audio playback."""
         self.repeat_all = False
         self.player.stop()
-        self.status_bar.showMessage("Playback stopped", 2000)
+        self.showMessage("Playback stopped", 2000)
 
     def play_current_surah(self):
         """
@@ -2573,7 +2592,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             result = self.model.data(index, Qt.UserRole)
             if result:
                 self.notes_manager.add_bookmark(result['surah'], result['ayah'])
-                self.status_bar.showMessage("تم حفظ الآية في المرجعية", 2000)
+                self.showMessage("تم حفظ الآية في المرجعية", 2000)
 
     def show_bookmarks(self):
         if not hasattr(self, 'bookmark_dialog') or not self.bookmark_dialog:
