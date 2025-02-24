@@ -13,6 +13,7 @@ import os
 import sys
 import csv
 import json
+import time
 import logging
 from datetime import datetime
 from collections import OrderedDict
@@ -862,11 +863,14 @@ class NotesWidget(QtWidgets.QWidget):
         list_font.setPointSize(12)  # Increased from default 9-10
         self.notes_list.setFont(list_font)
 
-        # Optional: Add padding and set minimum row height
+        #Optional: Add padding and set minimum row height
         self.notes_list.setStyleSheet("""
             QListWidget::item {
-                padding: 6px;
-                border-bottom: 1px solid #ddd;
+                padding: 8px;
+            }
+            QListWidget::item:selected {
+                color: palette(highlighted-text);
+                background: palette(highlight);
             }
         """)
         self.notes_list.setMinimumHeight(100)
@@ -1629,6 +1633,109 @@ class BookmarkDialog(QtWidgets.QDialog):
             self.model.endRemoveRows()
 
 
+class HelpDialog(QtWidgets.QDialog):
+    _instance = None  # Singleton instance
+    _cache = None
+    DARK_CSS =  """
+        <style>
+            body {
+                background-color: #333333 !important;
+                color: #FFFFFF !important;
+            }
+            a {
+                color: #1a73e8 !important;
+            }
+            h1, h2, h3 {
+                border-color: #1a73e8 !important;
+            }
+            .section, table {
+                background-color: #444444 !important;
+                color: #FFFFFF !important;
+                box-shadow: none !important;
+            }
+            .shortcut-key {
+                background: red;
+            }
+        </style>
+        """
+    
+    def __new__(cls, parent=None):
+        if not cls._instance:
+            cls._instance = super().__new__(cls)
+            cls._cache = HelpCacheManager()
+            cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self, parent=None):
+        if self._initialized:
+            return
+        super().__init__(parent)
+        self._initialized = True
+        self.setup_ui()
+        self.parent = parent
+        
+    def setup_ui(self):
+        self.setWindowTitle("دليل استخدام متصفح القرآن المتقدم")
+        self.resize(800, 600)
+        self.setWindowModality(QtCore.Qt.NonModal)
+        self.setAttribute(QtCore.Qt.WA_DeleteOnClose, False)
+        
+        layout = QtWidgets.QVBoxLayout(self)
+        self.web_view = QWebEngineView(self)
+        self.web_view.setPage(CustomWebEnginePage(self.web_view))
+        layout.addWidget(self.web_view)
+        
+    def load_content(self):
+        dark_mode = self.parent.theme_action.isChecked() if self.parent else False
+        content = self._cache.get_content(dark_mode)
+        self.web_view.page().setBackgroundColor(QColor("#333" if dark_mode else "#FFF"))
+        base_url = QtCore.QUrl.fromLocalFile(str(HelpCacheManager._file_path.parent))
+        self.web_view.setHtml(content, base_url)
+        
+    def toggle_theme(self, dark_mode):
+        self.web_view.page().setBackgroundColor(QColor("#333" if dark_mode else "#FFF"))
+        self.load_content()
+        
+    def showEvent(self, event):
+        self.load_content()
+        super().showEvent(event)
+
+class HelpCacheManager:
+    _instance = None
+    _content = ""
+    _dark_content = ""
+    _last_modified = 0
+    _file_path = Path(resource_path(os.path.join("help", "help_ar.html")))
+    
+    def __new__(cls):
+        if not cls._instance:
+            cls._instance = super().__new__(cls)
+            cls._load_content()
+        return cls._instance
+    
+    @classmethod
+    def _load_content(cls):
+        try:
+            if cls._file_path.exists():
+                cls._last_modified = cls._file_path.stat().st_mtime
+                with open(cls._file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    cls._content = content
+                    cls._dark_content = content.replace("</head>", HelpDialog.DARK_CSS + "</head>")
+        except Exception as e:
+            logging.error(f"Help content error: {str(e)}")
+            cls._content = cls._dark_content = "<h1>Help content unavailable</h1>"
+    
+    @classmethod
+    def get_content(cls, dark_mode=False):
+        # Refresh content every 5 minutes
+        if time.time() - cls._last_modified > 300:
+            cls._load_content()
+            
+        return cls._dark_content if dark_mode else cls._content
+
+
+
 # =============================================================================
 # Main application window
 # =============================================================================
@@ -1653,6 +1760,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.playing_context = 0
         self.playing_range = 0
         self.repeat_all = False
+        self.repeat_count = 0
+        self.max_repeats = 0
         self.playing_range_max = 0
         self.results_count_int = 0
         self.playing_ayah_range = False
@@ -1816,8 +1925,10 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, activated=self.input_focus)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+D"), self, activated=self.toggle_theme)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+P"), self, activated=self.handle_ctrlp)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+R"), self, activated=self.handle_ctrlr)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+R"), self, activated=self.handle_repeat_all_results)
+        #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+R"), self, activated=self.handle_ctrlr)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+R"), self, activated=self.handle_repeat_all_results)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+R"), self, 
+                            activated=lambda: self.handle_repeat_all_results(limited=True))
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+S"), self, activated=self.handle_ctrls)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+W"), self, activated=self.handle_ctrlw)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+W"), self, activated=self.handle_ctrlsw)
@@ -2255,6 +2366,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.current_detail_result = result
             version = self.get_current_version()
             is_dark_theme = self.theme_action.isChecked()
+            self.update_theme_style(is_dark_theme)
             self.detail_view.display_ayah(result, self.search_engine, version,is_dark_theme)
             self.detail_view.show()
             self.results_view.hide()
@@ -2269,11 +2381,28 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.results_view.setFocus()
 
     def handle_space(self):
-        self.playing_one = True
-        self.playing_context = 0
-        self.playing_range = 0
-        self.status_msg = ""
-        self.play_current()
+        # Check if player has media loaded and is in a playable state
+        if self.player.mediaStatus() != QMediaPlayer.NoMedia:
+            if self.player.state() == QMediaPlayer.PlayingState:
+                # Pause if currently playing
+                self.player.pause()
+                self.showMessage("Playback paused", 2000)
+                self.status_msg = "Paused"
+            else:
+                # Resume if paused or stopped
+                self.player.play()
+                self.showMessage("Playback resumed", 2000)
+                self.status_msg = "Resumed"
+        else:
+            # Original behavior - start new playback
+            self.playing_one = True
+            self.playing_context = 0
+            self.playing_range = 0
+            self.status_msg = ""
+            self.play_current()
+            
+        # Force UI update
+        #self.updatePermanentStatus()
 
     def handle_ctrlp(self):
         self.playing_context = 1
@@ -2289,12 +2418,33 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.playing_range_max = self.results_count_int
         self.play_current(count=self.playing_range_max)
 
-    def handle_repeat_all_results(self):
-        """Handle repeating all results in a loop"""
+    def handle_repeat_all_results(self, limited=False):
+        """Handle repeating with optional limit"""
+        if limited:
+            # Get repeat count from user
+            count, ok = QtWidgets.QInputDialog.getInt(
+                self, 
+                "Repeat Settings",
+                "Number of repeats:",
+                value=2, min=1, max=100, step=1
+            )
+            
+            if not ok or count < 1:
+                self.showMessage("Invalid repeat count", 2000, bg="red")
+                return
+                
+            self.max_repeats = count
+            self.repeat_count = 0
+            self.showMessage(f"Repeating {self.max_repeats} times", 3000)
+        else:
+            # Original infinite repeat behavior
+            self.max_repeats = 0  
+            self.repeat_count = 0
+            self.showMessage("Repeating all results continuously", 3000)
+        
+        # Common playback start logic
         self.repeat_all = True
-        #if not self.sequence_files:  # Only start playback if not already playing
         self.play_all_results()
-        self.showMessage("Repeating all results continuously", 3000)
 
     def handle_ctrlw(self):
         """Handle Ctrl+Z: Set search method to Surah and focus search input"""
@@ -2467,7 +2617,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
             chapter = self.search_engine.get_chapter_name(current_surah)
             self.status_msg = f"<span dir='rtl' style='text-align: right'> إستماع إلى الآية {current_ayah}   من سورة {chapter}  {self.current_sequence_index+1}/{maxx}</span>"
             if self.repeat_all or self.playing_range:
-                self.status_msg += " repeating "
+                self.status_msg += " repeating"
+                if self.max_repeats > 0:
+                    self.status_msg += f" ({self.repeat_count+1}/{self.max_repeats}) "
             # Continue playing the current surah.
             url = QUrl.fromLocalFile(file_path)
             self.player.setMedia(QMediaContent(url))
@@ -2491,8 +2643,15 @@ class QuranBrowser(QtWidgets.QMainWindow):
 # ==============================================================================\n
 #                 """
 #             )
-            if self.repeat_all:
-                # Reset to start of sequence for repeating
+            if self.repeat_all: 
+                if self.max_repeats > 0:
+                    self.repeat_count += 1
+                    if self.repeat_count >= self.max_repeats:
+                        self.repeat_all = False
+                        self.repeat_count = 0
+                        self.max_repeats = 0
+                        self.showMessage("Repeat limit reached", 3000)
+                        return
                 self.current_sequence_index = 0
                 self.play_next_file()
                 return 
@@ -2783,21 +2942,45 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
 
     def update_theme_style(self, dark):
+        splitter_handle = """
+        QSplitter::handle {{
+            background: {background};
+            border: 1px solid {border_color};
+            margin: 2px;
+        }}
+        QSplitter::handle:hover {{
+            background: {hover_color};
+        }}
+        """
+
         if dark:
-            self.setStyleSheet("""
-                QWidget {
-                    background: #333333;
-                    color: #FFFFFF;
-                }
-                QListView {
-                    background: #1e1e1e;
-                }
-                QLineEdit {
-                    background: #222222;
-                }
-            """)
+            style = f"""
+            QWidget {{
+                background: #333333;
+                color: #FFFFFF;
+            }}
+            {splitter_handle.format(
+                background="#555555",
+                border_color="#444444",
+                hover_color="#666666"
+            )}
+            QListView {{
+                background: #1e1e1e;
+            }}
+            QLineEdit {{
+                background: #222222;
+            }}
+            """
         else:
-            self.setStyleSheet("")
+            style = f"""
+            {splitter_handle.format(
+                background="#cccccc",
+                border_color="#aaaaaa",
+                hover_color="#999999"
+            )}
+            """
+        
+        self.setStyleSheet(style)
         self.settings.setValue("darkMode", dark)
 
     def clear_search(self):
@@ -2819,68 +3002,17 @@ class QuranBrowser(QtWidgets.QMainWindow):
         )
 
 
+    # Then modify your show_help_dialog method:
     def show_help_dialog(self):
-        help_file = Path(resource_path(os.path.join("help", "help_ar.html")))
-        if not help_file.exists():
-            self.showMessage("Help file not found", 3000, bg="red")
-            return
-
-        # Create as persistent dialog
-        if not hasattr(self, 'help_dialog') or not self.help_dialog.isVisible():
-            self.help_dialog = QtWidgets.QDialog(self)
-            self.help_dialog.setWindowTitle("دليل استخدام متصفح القرآن المتقدم")
-            self.help_dialog.resize(800, 600)
+        if not hasattr(self, '_help_dialog'):
+            self._help_dialog = HelpDialog(self)
             
-            # Set non-modal properties
-            self.help_dialog.setWindowModality(QtCore.Qt.NonModal)
-            self.help_dialog.setAttribute(QtCore.Qt.WA_DeleteOnClose, False)
-            
-            layout = QtWidgets.QVBoxLayout(self.help_dialog)
-            web_view = QWebEngineView(self.help_dialog)
-            web_view.setPage(CustomWebEnginePage(web_view))
-            layout.addWidget(web_view)
-            
-            if self.theme_action.isChecked():
-                web_view.page().setBackgroundColor(QColor("#333333"))
-            else:
-                web_view.page().setBackgroundColor(QColor("#FFFFFF"))
-
-            with open(str(help_file), 'r', encoding='utf-8') as f:
-                html_text = f.read()
-
-            if self.theme_action.isChecked():
-                dark_style = """
-                <style>
-                    body {
-                        background-color: #333333 !important;
-                        color: #FFFFFF !important;
-                    }
-                    a {
-                        color: #1a73e8 !important;
-                    }
-                    h1, h2, h3 {
-                        border-color: #1a73e8 !important;
-                    }
-                    .section, table {
-                        background-color: #444444 !important;
-                        color: #FFFFFF !important;
-                        box-shadow: none !important;
-                    }
-                    .shortcut-key {
-                        background: red;
-                    }
-                </style>
-                """
-                html_text = html_text.replace("</head>", dark_style + "</head>")
-
-            base_url = QtCore.QUrl.fromLocalFile(str(help_file.parent))
-            web_view.setHtml(html_text, base_url)
-        
-        # Toggle visibility rather than creating new
-        if self.help_dialog.isVisible():
-            self.help_dialog.hide()
+        if self._help_dialog.isVisible():
+            self._help_dialog.hide()
         else:
-            self.help_dialog.show()
+            self._help_dialog.show()
+            self._help_dialog.raise_()
+            self._help_dialog.activateWindow()
 
 if __name__ == "__main__":
     from PyQt5.QtGui import QGuiApplication
