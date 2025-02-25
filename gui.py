@@ -430,17 +430,18 @@ class SearchWorker(QtCore.QThread):
     results_ready = QtCore.pyqtSignal(list)
     error_occurred = QtCore.pyqtSignal(str)
 
-    def __init__(self, search_engine, method, query, parent=None):
+    def __init__(self, search_engine, method, query, is_dark_theme, parent=None):
         super().__init__(parent)
         self.parent = parent  
         self.search_engine = search_engine
         self.method = method
         self.query = query
+        self.is_dark_theme = is_dark_theme  
 
     def run(self):
         try:
             if self.method == "Text":
-                results = self.search_engine.search_verses(self.query)
+                results = self.search_engine.search_verses(self.query,self.is_dark_theme)
             elif self.method == "Surah":
                 if self.query.isdigit():
                     results = self.search_engine.search_by_surah(int(self.query))
@@ -2373,7 +2374,14 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 pass
 
         # Start the search in a background thread.
-        self.search_worker = SearchWorker(self.search_engine, method, query,parent=self)
+        is_dark = self.theme_action.isChecked()
+        self.search_worker = SearchWorker(
+            search_engine=self.search_engine,
+            method=method,
+            query=query,
+            is_dark_theme=is_dark,  
+            parent=self
+        )
         self.search_worker.results_ready.connect(self.handle_search_results)
         self.search_worker.error_occurred.connect(lambda error: self.showMessage(f"Search error: {error}", 3000, bg="red"))
         self.search_worker.start()

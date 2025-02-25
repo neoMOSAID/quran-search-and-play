@@ -96,19 +96,24 @@ class QuranSearch:
         text = re.sub(r'\s+', ' ', text).strip()
         return text
 
-    def search_verses(self, query):
-        """Always search in simplified version but return both texts"""
+    def search_verses(self, query, is_dark_theme=False):
+        """Search with whole-word highlighting"""
         normalized_query = self._normalize_text(query)
         results = []
         
         for (surah, ayah), data in self._simplified.items():
             if normalized_query in self._normalize_text(data['text']):
                 uthmani_text = self._uthmani.get((surah, ayah), {}).get('text', '')
+                
+                # Apply highlighting to both versions
+                highlighted_simplified = self.highlight_matches(data['text'], query, is_dark_theme)
+                highlighted_uthmani = self.highlight_matches(uthmani_text, query, is_dark_theme)
+                
                 results.append({
                     'surah': surah,
                     'ayah': ayah,
-                    'text_simplified': data['text'],
-                    'text_uthmani': uthmani_text,
+                    'text_simplified': highlighted_simplified,
+                    'text_uthmani': highlighted_uthmani,
                     'chapter': self.get_chapter_name(surah)
                 })
         
@@ -259,6 +264,22 @@ class QuranSearch:
     def get_common_words(self, limit=5000):
         """Get most frequently used words"""
         return self.get_all_simplified_words()[:limit]
+    
+
+    def highlight_matches(self, text, query, is_dark_theme=False):
+        """Theme-aware highlighting"""
+        #highlight_bg = "#2B5A84" if is_dark_theme else "#FFFF00"  # Dark blue / Yellow
+        highlight_text = "#FFFF00" if is_dark_theme else "#8b0000"  # yellow / darkred
+        # background: {highlight_bg}; 
+        
+        normalized_query = self._normalize_text(query)
+        words = text.split()
+        
+        for i, word in enumerate(words):
+            if normalized_query in self._normalize_text(word):
+                words[i] = f'<span style="color: {highlight_text};">{word}</span>'
+        
+        return ' '.join(words)
 
 
 class QuranWordCache:
