@@ -25,7 +25,7 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
 from PyQt5.QtCore import QStandardPaths, QSettings
 from PyQt5.QtGui import QColor, QDesktopServices
 
-from search import QuranSearch
+from search import QuranSearch, QuranWordCache
 
 import sqlite3
 from pathlib import Path
@@ -474,8 +474,35 @@ class SearchWorker(QtCore.QThread):
 class SearchLineEdit(QtWidgets.QLineEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.history_max = 50  # Increased from 20 to 50
+        self.history_max = 500  # 
+        self.init_completer()
         self.init_history()
+
+        # Setup text editing signals
+        self.textEdited.connect(self.update_completion_prefix)
+
+    def init_completer(self):
+        # Create completer with dual models
+        self.completer_model = QtCore.QStringListModel()
+        
+        self.completer = QtWidgets.QCompleter()
+        self.completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.completer.setFilterMode(QtCore.Qt.MatchContains)
+        self.completer.setModel(self.completer_model)
+        self.completer.setCompletionMode(QtWidgets.QCompleter.PopupCompletion)
+        
+        # Arabic font styling
+        self.completer.popup().setStyleSheet("""
+            QListView {
+                font-family: 'Amiri';
+                font-size: 14pt;
+            }
+        """)
+        
+        self.setCompleter(self.completer)
+        
+        # Load Quran words in background
+        QtCore.QTimer.singleShot(100, self.update_completer_model)
 
     def init_history(self):
         # Create history menu
@@ -491,26 +518,41 @@ class SearchLineEdit(QtWidgets.QLineEdit):
         self.history = self.history[:self.history_max]  # Enforce max limit
         self.update_history_list()
 
+        self.update_completer_model()
+
     def select_history_item(self, item):
         self.setText(item.text())
         self.returnPressed.emit()
 
     def update_history(self, query):
+        """Update both history and completer"""
         if query and query not in self.history:
-            # Add to beginning and enforce max limit
             self.history.insert(0, query)
             self.history = self.history[:self.history_max]
-
-            # Persist to QSettings
             settings = QtCore.QSettings("MOSAID", "QuranSearch")
             settings.setValue("searchHistory", self.history)
-
             self.update_history_list()
+            self.update_completer_model()
+        
+
+    def update_completer_model(self):
+        """Combine search history and Quran words"""
+        quran_words = QuranWordCache._words
+        combined = self.history + ["── Quran Words ──"] + quran_words
+        self.completer_model.setStringList(combined)
+
 
     def update_history_list(self):
         self.history_list.clear()
         for item in self.history:
             self.history_list.addItem(item)
+
+    def update_completion_prefix(self, text):
+        """Handle RTL text properly"""
+        if text.strip():
+            self.completer.setCompletionPrefix(text)
+            if self.completer.completionCount() > 0:
+                self.completer.complete()
 
     #still unused
     def clear_history(self):
@@ -1745,6 +1787,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         icon_path = resource_path("icon.png")
         self.setWindowIcon(QtGui.QIcon(icon_path))
         self.search_engine = QuranSearch()
+        QuranWordCache(self.search_engine)
         self.ayah_selector = None
         self.bookmark_dialog = None
         self.current_detail_result = None
@@ -1921,7 +1964,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def setup_shortcuts(self):
         QtWidgets.QShortcut(QtGui.QKeySequence("Space"), self, activated=self.handle_space)
         QtWidgets.QShortcut(QtGui.QKeySequence("Escape"), self, activated=self.toggle_version)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Backspace"), self, activated=self.show_results_view)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Backspace"), self, activated=self.handle_backspace)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, activated=self.input_focus)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+D"), self, activated=self.toggle_theme)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+P"), self, activated=self.handle_ctrlp)
@@ -1949,6 +1992,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+B"), self, activated=self.show_bookmarks)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+B"), self, activated=self.bookmark_current_ayah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+="), self, activated=self.increase_font_size)  # Ctrl++
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl++"), self, activated=self.increase_font_size) 
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+-"), self, activated=self.decrease_font_size)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+MouseWheelUp"), self, activated=self.increase_font_size)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+MouseWheelDown"), self, activated=self.decrease_font_size)
@@ -2374,6 +2418,41 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def input_focus(self):
         self.search_input.setFocus()
         self.search_input.selectAll()
+
+    def handle_backspace(self):
+        # Switch to results view if in detail view
+        if self.detail_view.isVisible():
+            self.show_results_view()
+        
+        # Get current selection
+        index = self.results_view.currentIndex()
+        if not index.isValid():
+            return
+
+        result = self.model.data(index, Qt.UserRole)
+        if not result:
+            return
+
+        try:
+            surah = int(result.get('surah'))
+            ayah = int(result.get('ayah'))
+        except (ValueError, TypeError):
+            return
+
+        # Direct scroll without loading logic
+        QtCore.QTimer.singleShot(50, lambda: self._scroll_to_ayah_immediate(surah, ayah))
+
+    def _scroll_to_ayah_immediate(self, surah, ayah):
+        # Search through all loaded items
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            result = self.model.data(index, Qt.UserRole)
+            if result and result['surah'] == surah and result['ayah'] == ayah:
+                self.results_view.setCurrentIndex(index)
+                self.results_view.scrollTo(index, 
+                    QtWidgets.QAbstractItemView.PositionAtCenter)
+                break
+
 
     def show_results_view(self):
         self.detail_view.hide()

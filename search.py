@@ -1,6 +1,7 @@
 import re
 import os, sys
 import importlib.resources
+import logging
 
 
 
@@ -242,5 +243,59 @@ class QuranSearch:
                     results.append(r)
         
         return results
+    
+    def get_all_simplified_words(self):
+        """Return unique words from simplified Quran text with counts"""
+        word_counts = {}
+        for (surah, ayah), data in self._simplified.items():
+            text = self._normalize_text(data['text'])
+            for word in text.split():
+                word_counts[word] = word_counts.get(word, 0) + 1
+        
+        # Sort by frequency then alphabetically
+        return sorted(word_counts.keys(), 
+                    key=lambda x: (-word_counts[x], x))
+
+    def get_common_words(self, limit=5000):
+        """Get most frequently used words"""
+        return self.get_all_simplified_words()[:limit]
 
 
+class QuranWordCache:
+    _instance = None
+    _words = []
+    
+    def __new__(cls, search_engine):
+        if not cls._instance:
+            cls._instance = super().__new__(cls)
+            cls._search_engine = search_engine
+            cls._cache_file = "quran_words.cache"
+            cls._load_cache()
+        return cls._instance
+    
+    @classmethod
+    def _load_cache(cls):
+        """Load cache or generate if missing"""
+        try:
+            cache_path = resource_path(cls._cache_file)
+            if os.path.exists(cache_path):
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    cls._words = f.read().splitlines()
+            else:
+                cls._regenerate_cache()
+        except Exception as e:
+            logging.error(f"Word cache error: {str(e)}")
+            cls._words = cls._search_engine.get_common_words()
+
+    @classmethod
+    def _regenerate_cache(cls):
+        """Create new cache file"""
+        try:
+            all_words = cls._search_engine.get_all_simplified_words()
+            cache_path = resource_path(cls._cache_file)
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(all_words))
+            cls._words = all_words
+        except Exception as e:
+            logging.error(f"Cache regeneration failed: {str(e)}")
+            cls._words = []
