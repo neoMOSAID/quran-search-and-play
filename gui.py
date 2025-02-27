@@ -10,6 +10,7 @@ Improved Quran Browser with:
 """
 
 import os
+import re
 import sys
 import csv
 import json
@@ -100,6 +101,22 @@ class NotesManager:
             """, (surah, ayah))
             return [{"id": row[0], "content": row[1], "created": row[2]}
                     for row in cursor.fetchall()]
+        
+    def get_all_notes(self):
+        """Get all notes sorted by timestamp"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT id, surah, ayah, content, created 
+                FROM notes 
+                ORDER BY created DESC
+            """)
+            return [{
+                'id': row[0],
+                'surah': row[1],
+                'ayah': row[2],
+                'content': row[3],
+                'created': row[4]
+            } for row in cursor.fetchall()]
 
     def add_note(self, surah, ayah, content):
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -585,11 +602,12 @@ class SearchLineEdit(QtWidgets.QLineEdit):
 
 class QuranDelegate(QtWidgets.QStyledItemDelegate):
     """Custom delegate for rendering Quran verses with proper RTL support."""
-    def __init__(self, version="uthmani", parent=None):
+    def __init__(self, version="uthmani", parent=None,is_dark=False):
         super().__init__(parent)
         self.version = version
+        self.is_dark = is_dark
         self.query = ""
-        self.highlight_color = "#4CAF5050"
+        self.update_theme(is_dark)
         self.settings = QSettings("MOSAID", "QuranSearch")
         self.base_font_size = self.settings.value("resultFontSize", 16, type=int)
 
@@ -597,6 +615,15 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         self.base_font_size = new_size
         self.settings.setValue("resultFontSize", self.base_font_size)
         self.sizeHintChanged.emit(QtCore.QModelIndex())  # Notify view of size changes
+
+    def update_theme(self, is_dark):
+        self.is_dark = is_dark
+        if self.is_dark:
+            self.highlight_color = "#5D6D7E"
+        else:
+            self.highlight_color = "#a0c4ff"
+        if self.parent():
+            self.parent().viewport().update()
 
     def update_version(self, version):
         self.version = version
@@ -617,6 +644,8 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         doc.setTextWidth(option.rect.width() - 20)
 
         if option.state & QtWidgets.QStyle.State_Selected:
+            option.palette.setColor(QtGui.QPalette.Highlight, QColor(self.highlight_color))
+            option.palette.setColor(QtGui.QPalette.HighlightedText, QColor("#ffffff"))
             painter.fillRect(option.rect, option.palette.highlight())
             doc.setDefaultStyleSheet(f"body {{ color: {option.palette.highlightedText().color().name()}; }}")
 
@@ -1038,7 +1067,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
 
     def __init__(self, notes_manager, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Ayah Selector")
+        self.setWindowTitle("دروس القرآن")
         self.resize(250, 350)  # Set initial size but allow resizing
         self.notes_manager = notes_manager
         self.current_course_id = None
@@ -1676,6 +1705,292 @@ class BookmarkDialog(QtWidgets.QDialog):
             self.model.endRemoveRows()
 
 
+class NotesManagerDialog(QtWidgets.QDialog):
+    show_ayah_requested = QtCore.pyqtSignal(int, int)  # Surah, Ayah
+
+    def __init__(self, notes_manager, search_engine, parent=None):
+        super().__init__(parent)
+        self.notes_manager = notes_manager
+        self.search_engine = search_engine
+        self.current_note = None
+        self.init_ui()
+        self.setup_rtl()
+
+    def init_ui(self):
+        self.setWindowTitle("إدارة التسجيلات")
+        self.resize(1000, 600)
+        
+        # Main layout
+        main_layout = QtWidgets.QVBoxLayout(self)
+        
+        # Splitter with 20%-80% initial ratio
+        self.splitter = QtWidgets.QSplitter(Qt.Horizontal)
+        
+        # Content area (80%)
+        content_widget = QtWidgets.QWidget()
+        content_layout = QtWidgets.QVBoxLayout(content_widget)
+        
+        # Note content editor
+        self.note_content = QtWidgets.QTextEdit()
+        self.note_content.textChanged.connect(self.on_content_changed)
+        
+        # Buttons
+        button_box = QtWidgets.QDialogButtonBox(Qt.Horizontal)
+        self.save_btn = button_box.addButton("حفظ", QtWidgets.QDialogButtonBox.ActionRole)
+        self.delete_btn = button_box.addButton("حذف", QtWidgets.QDialogButtonBox.DestructiveRole)
+        self.show_btn = button_box.addButton("عرض الآية", QtWidgets.QDialogButtonBox.HelpRole)
+        
+        self.save_btn.setEnabled(False)
+        self.delete_btn.setEnabled(False)
+        
+        content_layout.addWidget(QtWidgets.QLabel("المحتوى:"))
+        content_layout.addWidget(self.note_content)
+        content_layout.addWidget(button_box)
+        
+        # Notes list (20%)
+        self.notes_list = QtWidgets.QListWidget()
+        self.notes_list.setLayoutDirection(Qt.RightToLeft)
+        self.notes_list.itemSelectionChanged.connect(self.on_note_selected)
+        
+        # Add widgets to splitter
+        self.splitter.addWidget(self.notes_list)
+        self.splitter.addWidget(content_widget)
+        self.splitter.setSizes([200, 800])  # 80%-20% ratio
+        
+        main_layout.addWidget(self.splitter)
+        
+        # Connections
+        self.save_btn.clicked.connect(self.save_note)
+        self.delete_btn.clicked.connect(self.delete_note)
+        self.show_btn.clicked.connect(self.show_ayah)
+
+    def setup_rtl(self):
+        # Set RTL layout direction
+        self.setLayoutDirection(Qt.RightToLeft)
+        self.notes_list.setLayoutDirection(Qt.RightToLeft)
+        
+        # Arabic font styling
+        arabic_font = QtGui.QFont("Amiri", 12)
+        self.notes_list.setFont(arabic_font)
+        self.note_content.setFont(arabic_font)
+        
+        self.notes_list.setStyleSheet("""
+            QListWidget {
+                font-family: 'Amiri';
+                font-size: 14pt;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #ddd;
+            }
+        """)
+
+    def load_notes(self):
+        self.notes_list.clear()
+        notes = self.notes_manager.get_all_notes()
+        
+        for note in notes:
+            surah_name = self.search_engine.get_chapter_name(note['surah'])
+            item_text = f"{surah_name} - الآية {note['ayah']}"
+            item = QtWidgets.QListWidgetItem(item_text)
+            item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            item.setData(Qt.UserRole, note)
+            self.notes_list.addItem(item)
+
+    def on_note_selected(self):
+        selected = self.notes_list.currentItem()
+        if selected:
+            self.current_note = selected.data(Qt.UserRole)
+            self.note_content.setPlainText(self.current_note['content'])
+            self.delete_btn.setEnabled(True)
+            self.show_btn.setEnabled(True)
+        else:
+            self.current_note = None
+            self.note_content.clear()
+            self.delete_btn.setEnabled(False)
+            self.show_btn.setEnabled(False)
+
+    def on_content_changed(self):
+        self.save_btn.setEnabled(True)
+
+    def save_note(self):
+        if self.current_note:
+            new_content = self.note_content.toPlainText().strip()
+            if new_content:
+                self.notes_manager.update_note(self.current_note['id'], new_content)
+                self.load_notes()
+                self.save_btn.setEnabled(False)
+                self.showMessage("تم حفظ التغييرات", 2000)
+
+    def delete_note(self):
+        if self.current_note:
+            confirm = QtWidgets.QMessageBox.question(
+                self,
+                "تأكيد الحذف",
+                "هل أنت متأكد من حذف هذا التسجيل؟",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+            )
+            if confirm == QtWidgets.QMessageBox.Yes:
+                self.notes_manager.delete_note(self.current_note['id'])
+                self.load_notes()
+                self.current_note = None
+                self.note_content.clear()
+                self.showMessage("تم حذف التسجيل", 2000)
+
+    def show_ayah(self):
+        if self.current_note:
+            self.show_ayah_requested.emit(
+                self.current_note['surah'], 
+                self.current_note['ayah']
+            )
+            self.accept()
+
+    def showMessage(self, message, timeout):
+        QtWidgets.QToolTip.showText(
+            self.mapToGlobal(QtCore.QPoint(0,0)),
+            message,
+            self,
+            QtCore.QRect(),
+            timeout
+        )
+
+    def showEvent(self, event):
+        self.load_notes()
+        super().showEvent(event)
+
+
+class ShortsTableDelegate(QtWidgets.QStyledItemDelegate):
+    def __init__(self, left=25, right=25, parent=None):
+        super().__init__(parent)
+        self.left = left
+        self.right = right
+
+    def paint(self, painter, option, index):
+        # Make a copy of the option and adjust the rectangle for padding.
+        new_option = QtWidgets.QStyleOptionViewItem(option)
+        new_option.palette.setColor(QtGui.QPalette.HighlightedText, QColor("#000"))
+        new_option.rect = option.rect.adjusted(self.left, 0, -self.right, 0)
+
+        super().paint(painter, new_option, index)
+
+class CompactHelpDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("اختصارات لوحة المفاتيح")
+        self.resize(700, 600)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        # Create table with 2 columns
+        self.table = QtWidgets.QTableWidget()
+        self.table.setColumnCount(2)
+        self.table.setLayoutDirection(QtCore.Qt.RightToLeft)
+        self.table.setHorizontalHeaderLabels(["الاختصار", "الوظيفة"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        # Column 0 resizes to fit contents, column 1 stretches to fill the remaining space
+        #self.table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        self.setStyleSheet("""
+            font-family: Amiri;
+            font-size: 14pt;
+            color: #000;
+        """)
+        
+        self.table.setItemDelegate(ShortsTableDelegate(15, 15, self.table))
+        # Data structure:
+        # For header rows, tuple: (True, "Category header text")
+        # For normal rows, tuple: (False, (category, shortcut, function))
+        rows = [
+            (True, " لمزيد من التفاصيل : Ctrl + Shift + H"),
+            (False,("","","")),
+
+            (True, "التنقل والبحث"),
+            (False, ("التنقل", "Ctrl + F", "الانتقال إلى حقل البحث")),
+            (False, ("التنقل", "Ctrl + W", "التحول الى \"البحث بالسورة\" ثم الانتقال إلى حقل البحث")),
+            (False, ("التنقل", "Ctrl + Shift + W", "التحول الى \"البحث بنطاق الآيات\" ثم الانتقال إلى حقل البحث")),
+            (False, ("التنقل", "Ctrl + J", "الانتقال إلى سورة الآية المحددة")),
+            (False, ("التنقل", "Ctrl + K", "العودة إلى سورة التشغيل الحالية")),
+            (False, ("التنقل", "Ctrl + M", "العودة إلى السورة الحالية")),
+            (False, ("التنقل", "← Left / Right →", "التنقل بين السور")),
+            (False, ("التنقل", "↑ Up / Down ↓", "التنقل بين الآيات")),
+            (False, ("التنقل", "Backspace", "العودة الى النتائج من سياق الآية")),
+            (False, ("التنقل", "Ctrl + C", " نسخ الآيات المحددة")),
+            (False, ("التنقل", "Ctrl + Shift + C", " نسخ جميع النتائج ")),
+
+            (True, "التشغيل الصوتي"),
+            (False, ("الصوت", "Space", "تلاوة الآية المحددة أو توقيف/تشغيل التلاوة")),
+            (False, ("الصوت", "Ctrl + P", "تلاوة الآية و 5 بعدها")),
+            (False, ("الصوت", "Ctrl + A", "تلاوة السورة كاملة و الاستمرار في تلاوة القرآن")),
+            (False, ("الصوت", "Ctrl + Shift + P", "تلاوة جميع النتائج")),
+            (False, ("الصوت", "Ctrl + R", "تكرار الإستماع لجميع النتائج")),
+            (False, ("الصوت", "Ctrl + Shift + R", "تكرار الإستماع لجميع النتائج عددا محددا من المرات")),
+            (False, ("الصوت", "Ctrl + S", "توقيف وإنهاء التلاوة")),
+            
+            (True, "إدارة الملاحظات"),
+            (False, ("الملاحظات", "Ctrl + Shift + N", " إظهار نافذة إدارة الملاحظات")),
+            (False, ("الملاحظات", "Ctrl + N", "ملاحظة جديدة")),
+            (False, ("الملاحظات", "Ctrl + S", "حفظ الملاحظة")),
+            (False, ("الملاحظات", "Ctrl + Delete", "حذف الملاحظة")),
+            (False, ("الملاحظات", "Ctrl + E", "تصدير الملاحظات")),
+            (False, ("الملاحظات", "Ctrl + I", "استيراد الملاحظات")),
+            
+            (True, "إدارة الدروس"),
+            (False, ("الدروس", "Ctrl + Shift + T", "إظهار نافذة الدروس")),
+            (False, ("الدروس", "← Left / Right →", "التنقل بين الدروس")),
+            (False, ("الدروس", "↑ Up / Down ↓", "التنقل بين التسجيلات")),
+            (False, ("الدروس", "↑ Ctrl + Up / Ctrl + Down ↓", "تغيير ترتيب التسجيلات")),
+            (False, ("الدروس", "Ctrl + T", "إضافة الآية المحددة إلى أحد الدروس")),
+            
+            (True, "إدارة المرجعيات"),
+            (False, ("المرجعيات", "Ctrl + Shift + B", "فتح نافذة المرجعيات")),
+            (False, ("المرجعيات", "Ctrl + B", "إضافة الآية المحددة الى قائمة المرجعيات")),
+            (False, ("المرجعيات", "Delete", "حذف الآية المحددة من قائمة المرجعيات")),
+            
+            (True, "الإعدادات العامة"),
+            (False, ("التخصيص", "Ctrl + D", "تبديل الوضع الليلي")),
+            (False, ("المساعدة", "Ctrl + H", "إظهار نافذة اختصارات لوحة المفاتيح")),
+            (False, ("المساعدة", "Ctrl + Shift + H", "إظهار نافذة المساعدة")),
+            (False, ("التخصيص", "Esc", "تبديل نوع الخط : عثماني / مبسط")),
+            (False, ("التخصيص", "Ctrl + =", "زيادة حجم الخط")),
+            (False, ("التخصيص", "Ctrl + +", "زيادة حجم الخط")),
+            (False, ("التخصيص", "Ctrl + -", "نقصان حجم الخط"))
+        ]
+        
+        self.table.setRowCount(len(rows))
+        
+        # Colors: header rows get a distinct background.
+        header_bg = QtGui.QColor("#5D6D7E")
+        
+        row_index = 0
+        for is_header, data in rows:
+            if is_header:
+                # Create header row spanning both columns.
+                item = QtWidgets.QTableWidgetItem(data)
+                item.setBackground(header_bg)
+                item.setTextAlignment(QtCore.Qt.AlignCenter)
+                self.table.setItem(row_index, 0, item)
+                self.table.setSpan(row_index, 0, 1, 2)
+                row_index += 1
+            else:
+                # Only add the shortcut and function columns.
+                category, shortcut, function = data
+                item_short = QtWidgets.QTableWidgetItem("\u202A" + shortcut + "\u202C")
+                item_short.setTextAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+                item_func = QtWidgets.QTableWidgetItem(function)
+                self.table.setItem(row_index, 0, item_short)
+                self.table.setItem(row_index, 1, item_func)
+                row_index += 1
+
+        layout.addWidget(self.table)
+        close_btn = QtWidgets.QPushButton("إغلاق")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+
+
 class HelpDialog(QtWidgets.QDialog):
     _instance = None  # Singleton instance
     _cache = None
@@ -1791,6 +2106,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QuranWordCache(self.search_engine)
         self.ayah_selector = None
         self.bookmark_dialog = None
+        self.notes_dialog = None
+        self.compact_help_dialog = None
         self.current_detail_result = None
         self._status_msg = ""
         self.temporary_message_active = False
@@ -1816,6 +2133,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.notes_manager = NotesManager()
 
         self.settings = QtCore.QSettings("MOSAID", "QuranSearch")
+        self.theme_action = None
         self.init_ui()
         self.setup_connections()
         self.setup_menu()
@@ -1873,12 +2191,12 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.model = QuranListModel()
         self.model.loading_complete.connect(self.handle_pending_scroll, QtCore.Qt.UniqueConnection)
         self.results_view.setModel(self.model)
-        self.delegate = QuranDelegate(parent=self.results_view)
-        self.results_view.setItemDelegate(self.delegate)
+        self.delegate = None 
         self.results_view.setUniformItemSizes(False)
         self.results_view.activated.connect(self.show_detail_view)
         self.results_view.setWordWrap(True)
         self.results_view.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.results_view.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)  
 
 
         self.detail_view = DetailView()
@@ -1978,18 +2296,20 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+W"), self, activated=self.handle_ctrlsw)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+A"), self.results_view, activated=self.play_current_surah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+M"), self, activated=self.backto_current_surah)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+H"), self, activated=self.show_help_dialog)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+H"), self, activated=self.show_help_dialog)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+H"), self, activated=self.show_compact_help)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+J"), self, activated=self.handle_ctrlj)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+K"), self, activated=self.load_surah_from_current_playback)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+N"), self, activated=self.new_note)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+N"), self, activated=self.show_notes_manager)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+E"), self, activated=self.export_notes)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+I"), self, activated=self.import_notes)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Delete"), self, activated=self.delete_note)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+P"), self, activated=self.play_all_results)
         QtWidgets.QShortcut(QtGui.QKeySequence("Left"), self, activated=self.navigate_surah_left)
         QtWidgets.QShortcut(QtGui.QKeySequence("Right"), self, activated=self.navigate_surah_right)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+C"), self, activated=self.show_ayah_selector)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+C"), self, activated=self.add_ayah_to_course)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+T"), self, activated=self.show_ayah_selector)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+T"), self, activated=self.add_ayah_to_course)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+B"), self, activated=self.show_bookmarks)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+B"), self, activated=self.bookmark_current_ayah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+="), self, activated=self.increase_font_size)  # Ctrl++
@@ -1997,6 +2317,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+-"), self, activated=self.decrease_font_size)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+MouseWheelUp"), self, activated=self.increase_font_size)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+MouseWheelDown"), self, activated=self.decrease_font_size)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+C"), self, activated=self.copy_all_results)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+C"), self, activated=self.copy_selected_results)
+
 
     def increase_font_size(self):
         new_size = self.delegate.base_font_size + 1
@@ -2013,9 +2336,78 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.showMessage(f"Font size: {self.delegate.base_font_size}",2000)
 
 
+    def copy_selected_results(self):
+        """Copy selected results to clipboard with verse references"""
+        selected = self.results_view.selectionModel().selectedIndexes()
+        
+        if not selected:
+            self.showMessage("No verses selected", 3000, bg="red")
+            return
+            
+        version = self.get_current_version()
+        text_list = []
+        
+        for index in selected:
+            result = self.model.data(index, Qt.UserRole)
+            if result:
+                # Remove span tags
+                raw_text = result.get(f'text_{version}', '')
+                clean_text = re.sub(r'<span[^>]*>|</span>', '', raw_text)
+                
+                surah_num = result.get('surah', '')
+                ayah = result.get('ayah', '')
+                chapter = self.search_engine.get_chapter_name(surah_num)
+                text_list.append(f"{clean_text} ({chapter} {ayah})")
+
+        full_text = "\n".join(text_list)
+        clipboard = QtWidgets.QApplication.clipboard()
+        clipboard.setText(full_text)
+        self.showMessage(f"Copied {len(selected)} selected verses", 3000)
+
+
+
+    def copy_all_results(self):
+        """Copy all search results to clipboard with verse references (without span tags)"""
+        if not self.model.results:
+            self.showMessage("No results to copy", 3000, bg="red")
+            return
+            
+        version = self.get_current_version()
+        text_list = []
+        
+        for result in self.model.results:
+            # Remove span tags using regular expression
+            raw_text = result.get(f'text_{version}', '')
+            clean_text = re.sub(r'<span[^>]*>|</span>', '', raw_text)
+            
+            surah_num = result.get('surah', '')
+            ayah = result.get('ayah', '')
+            chapter = self.search_engine.get_chapter_name(surah_num)
+            text_list.append(f"{clean_text} ({chapter} {ayah})")
+        
+        full_text = "\n".join(text_list)
+        clipboard = QtWidgets.QApplication.clipboard()
+        clipboard.setText(full_text)
+        self.showMessage("Copied all results to clipboard", 3000)
+
     def new_note(self):
         if self.detail_view.isVisible():
             self.detail_view.notes_widget.new_note()
+
+    def show_notes_manager(self):
+        if not self.notes_dialog:
+            self.notes_dialog = NotesManagerDialog(self.notes_manager, self.search_engine, self)
+            self.notes_dialog.show_ayah_requested.connect(self.load_and_show_ayah)
+        self.notes_dialog.show()
+
+    def load_and_show_ayah(self, surah, ayah):
+        self.load_surah_from_current_ayah(surah, ayah)
+        self.show_results_view()
+
+    def show_compact_help(self):
+        if not self.compact_help_dialog:
+            self.compact_help_dialog = CompactHelpDialog(self)
+        self.compact_help_dialog.show()
 
     def delete_note(self):
         if self.detail_view.isVisible():
@@ -2093,6 +2485,11 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.theme_action = QtWidgets.QAction("Dark Mode", self, checkable=True)
         self.theme_action.toggled.connect(self.update_theme_style)
         menu.addAction(self.theme_action)
+        
+        # Initialize delegate now that theme_action exists
+        self.delegate = QuranDelegate(parent=self.results_view, 
+                                    is_dark=self.theme_action.isChecked())
+        self.results_view.setItemDelegate(self.delegate)
 
         # New action: Set Audio Directory.
         audio_dir_action = QtWidgets.QAction("Set Audio Directory", self)
@@ -2103,6 +2500,11 @@ class QuranBrowser(QtWidgets.QMainWindow):
         bookmark_action = QtWidgets.QAction("Bookmark Manager", self)
         bookmark_action.triggered.connect(self.show_bookmarks)
         menu.addAction(bookmark_action)
+
+        # notes manager
+        notes_action = QtWidgets.QAction("Notes Manager", self)
+        notes_action.triggered.connect(self.show_notes_manager)
+        menu.addAction(notes_action)
 
         # bookmark action
         course_action = QtWidgets.QAction("Course Manager", self)
@@ -2680,8 +3082,14 @@ class QuranBrowser(QtWidgets.QMainWindow):
             if index.isValid():
                 result = self.model.data(index, Qt.UserRole)
                 try:
-                    selected_ayah = int(result.get('ayah'))
-                    self.current_sequence_index = selected_ayah -1
+                    surah = int(result.get('surah'))
+                    ayah = int(result.get('ayah'))
+                    expected_filename = f"{surah:03d}{ayah:03d}.mp3"
+                    # Iterate over the list of sequence files to find a match
+                    for idx, file_path in enumerate(self.sequence_files):
+                        if os.path.basename(file_path) == expected_filename:
+                            self.current_sequence_index = idx
+                            break
                 except Exception as e:
                     pass
             self.playing_ayah_range = True
@@ -2830,6 +3238,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
     def _scroll_to_ayah(self, surah, ayah):
         """Enhanced scroll function with progressive loading"""
+        self.results_view.selectionModel().clearSelection()
         # First try existing items
         for row in range(self.model.rowCount()):
             index = self.model.index(row, 0)
@@ -2852,6 +3261,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         """Stop any current audio playback."""
         self.repeat_all = False
         self.player.stop()
+        self.player.setMedia(QMediaContent())  # Clear current media
         self.showMessage("Playback stopped", 2000)
 
     def play_current_surah(self):
@@ -3068,6 +3478,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             """
         
         self.setStyleSheet(style)
+        self.delegate.update_theme(dark)
         self.settings.setValue("darkMode", dark)
 
     def clear_search(self):

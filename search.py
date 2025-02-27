@@ -75,7 +75,10 @@ class QuranSearch:
             'إ': 'ا',
             'أ': 'ا',
             'آ': 'ا',
-            'ء': '',
+            'ٱ': 'ا',  # Alef Wasla to Alef
+            'ء': '',   # Remove standalone hamza
+            'ئ': 'ي',  # Normalize hamza on ya
+            'ؤ': 'و',  # Normalize hamza on waw
             'ى': 'ي',
             'ة': 'ه'
         }
@@ -106,8 +109,8 @@ class QuranSearch:
                 uthmani_text = self._uthmani.get((surah, ayah), {}).get('text', '')
                 
                 # Apply highlighting to both versions
-                highlighted_simplified = self.highlight_matches(data['text'], query, is_dark_theme)
-                highlighted_uthmani = self.highlight_matches(uthmani_text, query, is_dark_theme)
+                highlighted_simplified = self.highlight(data['text'], query, is_dark_theme)
+                highlighted_uthmani = self.highlight(uthmani_text, query, is_dark_theme)
                 
                 results.append({
                     'surah': surah,
@@ -264,22 +267,85 @@ class QuranSearch:
     def get_common_words(self, limit=5000):
         """Get most frequently used words"""
         return self.get_all_simplified_words()[:limit]
-    
 
-    def highlight_matches(self, text, query, is_dark_theme=False):
-        """Theme-aware highlighting"""
-        #highlight_bg = "#2B5A84" if is_dark_theme else "#FFFF00"  # Dark blue / Yellow
-        highlight_text = "#FFFF00" if is_dark_theme else "#8b0000"  # yellow / darkred
-        # background: {highlight_bg}; 
-        
+    def highlight(self, text, query, is_dark_theme=False):
+        """Smart highlighter that handles both single and multi-word queries"""
+        if ' ' in query.strip():
+            return self.highlight_phrase(text, query, is_dark_theme)
+        return self.highlight_word(text, query, is_dark_theme)
+
+    def highlight_word(self, text, query, is_dark_theme):
+        """Original single-word highlighter"""
+        highlight_color = "#FFFF00" if is_dark_theme else "#ff0000"
         normalized_query = self._normalize_text(query)
-        words = text.split()
         
+        words = text.split()
         for i, word in enumerate(words):
             if normalized_query in self._normalize_text(word):
-                words[i] = f'<span style="color: {highlight_text};">{word}</span>'
+                words[i] = f'<span style="font-weight: bold; color: {highlight_color};">{word}</span>'
         
         return ' '.join(words)
+
+
+    def highlight_phrase(self, text, query, is_dark_theme):
+        """Highlights a multiword query phrase within the given Arabic text.
+        
+        This version builds a mapping from each character in the original text
+        to the corresponding character in a normalized version that removes diacritics
+        and normalizes hamza, but does not collapse whitespace. This ensures that spaces
+        are preserved when matching multi-word queries such as 'الله يحب'.
+        """
+        # Choose highlight color based on theme.
+        highlight_color = "#FFFF00" if is_dark_theme else "#8b0000"
+        
+        # Define a per-character normalization that doesn't collapse spaces.
+        def normalize_char(c):
+            # Only remove diacritics and normalize hamza.
+            c = QuranSearch._remove_diacritics(c)
+            c = QuranSearch._normalize_hamza(c)
+            return c
+        
+        # Build the normalized text and an index mapping from each normalized character
+        # back to its position in the original text.
+        normalized_chars = []
+        index_mapping = []  # Each element will be the original text index.
+        for original_index, char in enumerate(text):
+            norm_char = normalize_char(char)
+            # Even if norm_char is empty (e.g. if the char was a diacritic), we skip it.
+            if not norm_char:
+                continue
+            for single_char in norm_char:
+                normalized_chars.append(single_char)
+                index_mapping.append(original_index)
+        normalized_text = "".join(normalized_chars)
+        
+        # Normalize the query using the full normalization pipeline.
+        # (This is fine because query normalization usually handles multi-word spacing correctly.)
+        normalized_query = self._normalize_text(query)
+        
+        result_parts = []
+        last_original_index = 0
+        search_index = 0
+
+        while True:
+            pos = normalized_text.find(normalized_query, search_index)
+            if pos == -1:
+                result_parts.append(text[last_original_index:])
+                break
+
+            # Map the match start back to the original text.
+            original_start = index_mapping[pos]
+            # Use the maximum original index covered by the normalized match.
+            original_end = max(index_mapping[pos: pos + len(normalized_query)]) + 1
+
+            # Append text before the match and then the highlighted match.
+            result_parts.append(text[last_original_index:original_start])
+            result_parts.append(f'<span style="font-weight: bold; color: {highlight_color};">{text[original_start:original_end]}</span>')
+
+            last_original_index = original_end
+            search_index = pos + len(normalized_query)
+        
+        return "".join(result_parts)
 
 
 class QuranWordCache:
