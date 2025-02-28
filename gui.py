@@ -1063,7 +1063,13 @@ class NotesWidget(QtWidgets.QWidget):
 class AyahSelectorDialog(QtWidgets.QDialog):
     play_requested = QtCore.pyqtSignal(int, int, int)
     search_requested = QtCore.pyqtSignal(str)
-    PLACEHOLDER_TEXT = "Enter 'a surah start [end]' or :  \n 's search terms' help: Ctrl+H"
+    #PLACEHOLDER_TEXT = "Enter 'a surah start [end]' or :  \n 's search terms' help: Ctrl+H"
+    PLACEHOLDER_TEXT = "أكتب a رقم السورة رقم الآية [رقم الآية]"
+    PLACEHOLDER_TEXT += "\n"
+    PLACEHOLDER_TEXT += "أو أكتب s ثم كلمات البحث"
+    PLACEHOLDER_TEXT += "\n للمزيد : Ctrl+H \n"
+    PLACEHOLDER_TEXT += "مثال a 255 \n a 255 260 \n s بحر"
+
 
     def __init__(self, notes_manager, parent=None):
         super().__init__(parent)
@@ -1119,6 +1125,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
             QListView {
                 font-family: 'Amiri';
                 font-size: 14pt;
+                padding-right: 10px;
             }
         """)
 
@@ -1231,7 +1238,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         self.model.blockSignals(True)
         self.model.removeRow(row)
         self.model.blockSignals(False)
-        self.ensure_extra_row()
+        self.model.layoutChanged.emit() 
 
     def safe_remove_item(self, row):
         """Safely remove item after validation"""
@@ -1359,8 +1366,14 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                         elif data['type'] == 'search':
                             self.search_requested.emit(data['query'])
                 return True
-            elif event.key() == QtCore.Qt.Key_F2:
+            if event.key() == QtCore.Qt.Key_F2:
                 self.handle_f2_edit()
+                return True
+            if event.key() == QtCore.Qt.Key_Delete:
+                index = self.list_view.currentIndex()
+                if index.isValid():
+                    row = index.row()
+                    self.safe_remove_item(row)
                 return True
             # Add Ctrl+Up/Down handling
             if event.modifiers() & QtCore.Qt.ControlModifier:
@@ -1704,6 +1717,45 @@ class BookmarkDialog(QtWidgets.QDialog):
             self.model._loaded_count = min(self.model._loaded_count, len(self.model._bookmarks))
             self.model.endRemoveRows()
 
+
+class NoteDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("إضافة تسجيل")
+        self.setWindowModality(QtCore.Qt.NonModal)  # Non-modal
+        self.resize(400, 300)
+        
+        # Main vertical layout
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        # Text editor for note entry
+        self.editor = QtWidgets.QTextEdit()
+        self.editor.setPlaceholderText("Enter your note here...")
+        self.editor.setStyleSheet("""
+            font-family: 'Amiri';
+            font-size: 14pt;
+        """)
+
+        layout.addWidget(self.editor)
+
+        
+        # Create a horizontal layout for the label and buttons
+        h_layout = QtWidgets.QHBoxLayout()
+        
+        # Label to display verse information
+        self.info_label = QtWidgets.QLabel("")
+        h_layout.addWidget(self.info_label)
+        
+        # Dialog buttons
+        button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        h_layout.addWidget(button_box)
+        
+        # Add the horizontal layout to the main layout
+        layout.addLayout(h_layout)
 
 class NotesManagerDialog(QtWidgets.QDialog):
     show_ayah_requested = QtCore.pyqtSignal(int, int)  # Surah, Ayah
@@ -2319,7 +2371,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+MouseWheelDown"), self, activated=self.decrease_font_size)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+C"), self, activated=self.copy_all_results)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+C"), self, activated=self.copy_selected_results)
-
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Alt+N"), self, activated=self.show_quick_note_dialog)
 
     def increase_font_size(self):
         new_size = self.delegate.base_font_size + 1
@@ -2446,6 +2498,59 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def handle_course_search(self, query):
         self.search_input.setText(query)
         self.search()
+
+    def show_quick_note_dialog(self):
+        index = self.results_view.currentIndex()
+        if not index.isValid():
+            self.showMessage("No verse selected", 3000, bg="red")
+            return
+        
+        result = self.model.data(index, Qt.UserRole)
+        if not result:
+            return
+        
+        try:
+            surah = int(result['surah'])
+            ayah = int(result['ayah'])
+        except (KeyError, ValueError):
+            self.showMessage("Invalid verse data", 3000, bg="red")
+            return
+        
+        if not hasattr(self, 'note_dialog'):
+            self.note_dialog = NoteDialog(self)
+            self.note_dialog.accepted.connect(self.save_quick_note)
+        
+        self.note_dialog.surah = surah
+        self.note_dialog.ayah = ayah
+        self.note_dialog.chapter = self.search_engine.get_chapter_name(surah)
+        self.note_dialog.editor.clear()
+        
+        # Update the label with the desired text
+        self.note_dialog.info_label.setText(
+            f"إضافة تسجيل الى الآية {ayah} من سورة {self.note_dialog.chapter}"
+        )
+        
+        self.note_dialog.show()
+        self.note_dialog.raise_()
+        self.note_dialog.activateWindow()
+
+
+    def save_quick_note(self):
+        content = self.note_dialog.editor.toPlainText().strip()
+        if not content:
+            return
+        
+        self.notes_manager.add_note(
+            self.note_dialog.surah,
+            self.note_dialog.ayah,
+            content
+        )
+        
+        # Refresh notes if detail view is visible
+        if self.detail_view.isVisible():
+            self.detail_view.notes_widget.load_notes()
+        
+        self.showMessage("Note saved successfully", 2000)
 
     def play_ayah_range(self, surah, start, end):
         #self.showMessage(f"{surah}:{start}--{end}", 5000)
