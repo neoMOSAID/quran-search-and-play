@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """
 Enhanced Windows Installer with User-Level Installation Support
+still testing
 """
 
 import os
