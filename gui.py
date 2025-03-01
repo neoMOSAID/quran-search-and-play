@@ -1067,7 +1067,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
     PLACEHOLDER_TEXT = "أكتب a رقم السورة رقم الآية [رقم الآية]"
     PLACEHOLDER_TEXT += "\n"
     PLACEHOLDER_TEXT += "أو أكتب s ثم كلمات البحث"
-    PLACEHOLDER_TEXT += "\n للمزيد : Ctrl+H \n"
+    PLACEHOLDER_TEXT += "\n للمزيد : Ctrl+Shift+H \n"
     PLACEHOLDER_TEXT += "مثال a 255 \n a 255 260 \n s بحر"
 
 
@@ -1340,6 +1340,10 @@ class AyahSelectorDialog(QtWidgets.QDialog):
 
     def eventFilter(self, source, event):
         if source is self.list_view and event.type() == QtCore.QEvent.KeyPress:
+            # Check for Ctrl+Delete first
+            if event.key() == QtCore.Qt.Key_Delete and event.modifiers() & QtCore.Qt.ControlModifier:
+                self.delete_current_course()
+                return True
             if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
                 index = self.list_view.currentIndex()
                 if index.isValid():
@@ -1505,6 +1509,25 @@ class AyahSelectorDialog(QtWidgets.QDialog):
     def save_and_close(self):
         self.save_course()
         self.accept()
+
+    def delete_current_course(self):
+        if self.current_course_id is not None:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Confirm Deletion",
+                f"هل تريد حقا حذف درس :  {self.course_input.text()} ؟",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No
+            )
+            if reply == QtWidgets.QMessageBox.Yes:
+                self.notes_manager.delete_course(self.current_course_id)
+                self.update_status("Current course deleted.")
+                self.load_new_course()  # Load a new course after deletion
+            else:
+                self.update_status("Course deletion canceled.")
+        else:
+            self.update_status("No current course to delete.")
+
     
     def move_item_up(self):
         current_row = self.list_view.currentIndex().row()
@@ -1985,8 +2008,9 @@ class CompactHelpDialog(QtWidgets.QDialog):
             (True, "إدارة الملاحظات"),
             (False, ("الملاحظات", "Ctrl + Shift + N", " إظهار نافذة إدارة الملاحظات")),
             (False, ("الملاحظات", "Ctrl + N", "ملاحظة جديدة")),
+            (False, ("الملاحظات", "Ctrl + Alt + N", "ملاحظة جديدة")),
             (False, ("الملاحظات", "Ctrl + S", "حفظ الملاحظة")),
-            (False, ("الملاحظات", "Ctrl + Delete", "حذف الملاحظة")),
+            (False, ("الملاحظات", "Delete", "حذف الملاحظة")),
             (False, ("الملاحظات", "Ctrl + E", "تصدير الملاحظات")),
             (False, ("الملاحظات", "Ctrl + I", "استيراد الملاحظات")),
             
@@ -1994,6 +2018,8 @@ class CompactHelpDialog(QtWidgets.QDialog):
             (False, ("الدروس", "Ctrl + Shift + T", "إظهار نافذة الدروس")),
             (False, ("الدروس", "← Left / Right →", "التنقل بين الدروس")),
             (False, ("الدروس", "↑ Up / Down ↓", "التنقل بين التسجيلات")),
+            (False, ("الدروس", "Delete", "حذف التسجيل المحدد  ")),
+            (False, ("الدروس", "Ctrl + Delete", "حذف الدرس الحالي  ")),
             (False, ("الدروس", "↑ Ctrl + Up / Ctrl + Down ↓", "تغيير ترتيب التسجيلات")),
             (False, ("الدروس", "Ctrl + T", "إضافة الآية المحددة إلى أحد الدروس")),
             
@@ -2356,7 +2382,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+N"), self, activated=self.show_notes_manager)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+E"), self, activated=self.export_notes)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+I"), self, activated=self.import_notes)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Delete"), self, activated=self.delete_note)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Delete"), self, activated=self.delete_note)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+P"), self, activated=self.play_all_results)
         QtWidgets.QShortcut(QtGui.QKeySequence("Left"), self, activated=self.navigate_surah_left)
         QtWidgets.QShortcut(QtGui.QKeySequence("Right"), self, activated=self.navigate_surah_right)
