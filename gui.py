@@ -1719,7 +1719,7 @@ class BookmarkDialog(QtWidgets.QDialog):
 
     def load_and_close(self):
         self.parent.load_selected_bookmark()
-        self.hide()
+        #self.hide()
 
     def remove_selected(self):
         selected = self.list_view.selectionModel().selectedIndexes()
