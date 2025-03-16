@@ -26,7 +26,7 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
 
     def update_font_size(self, new_size):
         self.base_font_size = new_size
-        self.settings.setValue("resultFontSize", self.base_font_size)
+        self.settings.set("resultFontSize", self.base_font_size)
         self.sizeHintChanged.emit(QtCore.QModelIndex())  # Notify view of size changes
 
     def update_theme(self, is_dark):

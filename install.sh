@@ -36,7 +36,9 @@ copy_files() {
     rsync -av \
         --exclude='**/__pycache__' \
         --exclude='**/*.pyc' \
-        gui.py help help_quransearch.1 icon.ico icon.png quran_text search.py requirements.txt "$DEST_DIR/"
+        --exclude='env' \
+         --exclude='.git' \
+        . "$DEST_DIR/"
 }
 
 # Function: Create a Python virtual environment.
@@ -81,7 +83,7 @@ create_cli_launcher() {
     echo -e "$GR Creating command line launcher at $WRAPPER_PATH...$NC"
     sudo tee "$WRAPPER_PATH" > /dev/null <<EOF
 #!/bin/bash
-"$PYTHON_EXEC" "$DEST_DIR/gui.py" & disown
+"$PYTHON_EXEC" "$DEST_DIR/app.py" & disown
 EOF
     sudo chmod +x "$WRAPPER_PATH"
 }
@@ -167,12 +169,12 @@ main() {
     copy_files
     create_virtualenv
     install_requirements
-    create_cli_launcher
-    create_desktop_entry
-    install_manpage
-    create_uninstall_script
-    create_uninstall_wrapper
-    # create_uninstall_desktop_entry
+    #create_cli_launcher
+    #create_desktop_entry
+    #install_manpage
+    #create_uninstall_script
+    #create_uninstall_wrapper
+    #create_uninstall_desktop_entry
 
     echo -e "$GR Installation completed successfully.$NC"
     echo "To launch Quran Search, run 'quranSearch' from the command line or use the desktop entry."

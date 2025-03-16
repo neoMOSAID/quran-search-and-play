@@ -18,13 +18,13 @@ def get_default_audio_directory():
     from utils.settings import AppSettings
 
     app_settings = AppSettings()
-    return app_settings.ensure_default_audio_directory()
+    return app_settings.default_audio_directory()
 
 
 def get_audio_directory():
     from utils.settings import AppSettings
 
     app_settings = AppSettings()
-    return app_settings.get_audio_directory(get_default_audio_directory())
+    return app_settings.get_audio_directory()
 
 

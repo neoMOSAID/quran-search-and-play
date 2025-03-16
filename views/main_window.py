@@ -17,6 +17,7 @@ from views.dialogs.course import CourseSelectionDialog
 from views.dialogs.ayah_selector import AyahSelectorDialog
 from views.dialogs.bookmarks import BookmarkDialog
 from views.dialogs.notes_manager import NotesManagerDialog
+from views.dialogs.notes_dialog import NoteDialog
 from views.dialogs.data_transfer import DataTransferDialog
 from views.dialogs.help_dialog import HelpDialog
 
@@ -239,7 +240,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+H"), self, activated=self.show_help_dialog)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+H"), self, activated=self.show_compact_help)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+J"), self, activated=self.handle_ctrlj)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+K"), self, activated=self.load_surah_from_current_playback)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+K"), self, 
+                            activated=self.audio_controller.load_surah_from_current_playback)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+N"), self, activated=self.new_note)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+N"), self, activated=self.show_notes_manager)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+E"), self, activated=self.show_data_transfer)
@@ -662,24 +664,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.handle_surah_selection(self.surah_combo.currentIndex())
 
     def backto_current_surah(self):
-        self.handle_surah_selection(self.current_surah-1)
-        current_ayah = self.current_start_ayah + self.current_sequence_index -1
-        self._scroll_to_ayah(self.current_surah,current_ayah)
-
-    def load_surah_from_current_playback(self):
-        """
-        If a playback sequence is active, use its current surah and the
-        last played (or currently playing) ayah to load that surah and scroll to it.
-        Bind this method to Ctrl+K.
-        """
-        current_media = self.audio_controller.player.media()
-        if current_media is not None:
-            url = current_media.canonicalUrl()
-            if url.isLocalFile():
-                file_path = url.toLocalFile()
-                current_surah = int(os.path.basename(file_path)[:3])
-                current_ayah = int(os.path.basename(file_path)[3:6])
-                self.load_surah_from_current_ayah(surah=current_surah, selected_ayah=current_ayah)
+        current_index = self.surah_combo.currentIndex()
+        self.handle_surah_selection(current_index)
 
     # def focus_notes(self):
     #     if self.detail_view.isVisible():

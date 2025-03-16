@@ -394,3 +394,18 @@ class AudioController:
         if chosen_dir:
             self.parent.settings.set("AudioDirectory", chosen_dir)
             self.parent.showMessage(f"Audio directory set to: {chosen_dir}", 3000)
+
+    def load_surah_from_current_playback(self):
+        """
+        If a playback sequence is active, use its current surah and the
+        last played (or currently playing) ayah to load that surah and scroll to it.
+        Bind this method to Ctrl+K.
+        """
+        current_media = self.player.media()
+        if current_media is not None:
+            url = current_media.canonicalUrl()
+            if url.isLocalFile():
+                file_path = url.toLocalFile()
+                current_surah = int(os.path.basename(file_path)[:3])
+                current_ayah = int(os.path.basename(file_path)[3:6])
+                self.parent.load_surah_from_current_ayah(surah=current_surah, selected_ayah=current_ayah)
