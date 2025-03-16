@@ -1,15 +1,5 @@
 from PyQt5 import QtCore
 
-#class QuranListModel(QtCore.QAbstractListModel):
-    # Keep all original methods:
-    # - loading_complete signal
-    # - data()
-    # - rowCount()
-    # - appendResults()
-    # - updateResults()
-    # - load_remaining_results()
-    # - handle_pending_scroll()   
-
 class QuranListModel(QtCore.QAbstractListModel):
     loading_complete = QtCore.pyqtSignal()
     def __init__(self, results=None, parent=None):
@@ -67,13 +57,6 @@ class QuranListModel(QtCore.QAbstractListModel):
             self.loading_complete.emit()
 
 
-
-#class BookmarkModel(QtCore.QAbstractListModel):
-    # Keep all original methods:
-    # - load_bookmarks()
-    # - load_next_chunk()
-    # - data()
-    # - rowCount()
 
 class BookmarkModel(QtCore.QAbstractListModel):
     def __init__(self):

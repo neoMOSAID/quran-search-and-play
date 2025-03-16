@@ -114,7 +114,7 @@ class BookmarkDialog(QtWidgets.QDialog):
             if row >= len(self.model._bookmarks):
                 continue  # Prevent invalid access
                 
-            bm = self.model.data(index, Qt.UserRole)
+            bm = self.model.data(index, QtCore.Qt.UserRole)
             self.parent.notes_manager.delete_bookmark(bm['surah'], bm['ayah'])
             
             self.model.beginRemoveRows(QtCore.QModelIndex(), row, row)

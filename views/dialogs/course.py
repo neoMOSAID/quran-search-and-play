@@ -1,6 +1,7 @@
 
 
 from PyQt5 import QtWidgets
+from PyQt5.QtCore import Qt
 
 class CourseSelectionDialog(QtWidgets.QDialog):
     def __init__(self, notes_manager, parent=None):

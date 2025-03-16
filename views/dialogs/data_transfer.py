@@ -26,7 +26,6 @@ class DataTransferDialog(QtWidgets.QDialog):
         self.progress_area.setReadOnly(True)
         self.progress_area.setStyleSheet("""
             QTextEdit {
-                background-color: #f0f0f0;
                 border: 1px solid #cccccc;
                 padding: 5px;
             }

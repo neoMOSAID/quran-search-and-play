@@ -26,14 +26,6 @@ class AudioController:
         self.playing_ayah_range = False
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
 
-        # Move audio methods from main window here:
-        # - play_current
-        # - play_next_file
-        # - stop_playback
-        # - play_all_results
-        # - on_media_status_changed
-    
-
     def on_media_status_changed(self, status):
         """
         Monitor the media player's status. When the current media finishes,

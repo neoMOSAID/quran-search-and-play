@@ -1,5 +1,6 @@
 
 import re
+import json
 
 from PyQt5 import QtWidgets, QtCore, QtGui
 from models.quran_model import QuranListModel
@@ -20,31 +21,6 @@ from views.dialogs.notes_manager import NotesManagerDialog
 from views.dialogs.notes_dialog import NoteDialog
 from views.dialogs.data_transfer import DataTransferDialog
 from views.dialogs.help_dialog import HelpDialog
-
-#class QuranBrowser(QtWidgets.QMainWindow):
-    # Keep core UI methods:
-    # - __init__
-    # - init_ui
-    # - setup_connections
-    # - setup_menu
-    # - setup_shortcuts
-    # - load_settings
-    # - closeEvent
-    
-    # Move audio methods to AudioController:
-    # DELETE: play_current, play_next_file, on_media_status_changed
-    # DELETE: stop_playback, play_all_results
-    
-    # Keep search-related methods:
-    # - search
-    # - handle_search_results
-    # - update_results
-    
-    # Keep UI handlers:
-    # - handle_version_change
-    # - handle_surah_selection
-    # - show_detail_view
-    # - show_results_view
 
 
 # =============================================================================

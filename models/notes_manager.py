@@ -1,23 +1,9 @@
 import sqlite3
 from pathlib import Path
+from datetime import datetime
 import json
+
 from PyQt5.QtCore import QStandardPaths
-
-#class NotesManager:
-    # Keep all original methods:
-    # - __init__
-    # - _init_db
-    # - get_notes
-    # - add_note
-    # - update_note
-    # - delete_note
-    # - save_course
-    # - get_all_courses
-    # - add_bookmark
-    # - get_all_bookmarks
-    # - delete_bookmark
-    # ...and all other DB methods
-
 
 
 class NotesManager:
