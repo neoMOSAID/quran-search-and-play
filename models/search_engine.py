@@ -28,14 +28,14 @@ class QuranSearch:
     def _load_data(self):
         """Load all required data files from the quran_text package"""
         self._load_chapters()
-        self._load_verses('uthmani.txt', self._uthmani)
-        self._load_verses('simplified.txt', self._simplified)
+        self._load_verses('quran_text/uthmani.txt', self._uthmani)
+        self._load_verses('quran_text/simplified.txt', self._simplified)
         self._build_verse_counts()
 
     def _load_chapters(self):
         """Load chapter names from the quran_text package"""
         try:
-            text = importlib.resources.read_text("quran_text", "chapters.txt", encoding="utf-8")
+            text = importlib.resources.read_text("resources", "quran_text/chapters.txt", encoding="utf-8")
             self._chapters = [line.strip() for line in text.splitlines()]
         except Exception as e:
             raise RuntimeError(f"Could not load chapters: {e}")
@@ -43,7 +43,7 @@ class QuranSearch:
     def _load_verses(self, filename, target_dict):
         """Generic verse loader for different versions from the quran_text package"""
         try:
-            text = importlib.resources.read_text("quran_text", filename, encoding="utf-8")
+            text = importlib.resources.read_text("resources", filename, encoding="utf-8")
             for line in text.splitlines():
                 parts = line.strip().split('|')
                 if len(parts) < 3:
