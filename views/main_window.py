@@ -983,12 +983,15 @@ class QuranBrowser(QtWidgets.QMainWindow):
             if result:
                 self.notes_manager.add_bookmark(result['surah'], result['ayah'])
                 self.showMessage("تم حفظ الآية في المرجعية", 2000)
+                if hasattr(self, 'bookmark_dialog'):
+                    self.bookmark_dialog.load_bookmarks()
 
     def show_bookmarks(self):
         if not hasattr(self, 'bookmark_dialog') or not self.bookmark_dialog:
             self.bookmark_dialog = BookmarkDialog(self)
             self.bookmark_dialog.list_view.doubleClicked.connect(self.load_and_close_dialog)
         
+        self.bookmark_dialog.load_bookmarks()
         self.bookmark_dialog.show()
         self.bookmark_dialog.raise_()
         self.bookmark_dialog.activateWindow()

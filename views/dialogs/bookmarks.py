@@ -22,7 +22,6 @@ class BookmarkDialog(QtWidgets.QDialog):
         self.list_view.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.list_view.setFocusPolicy(QtCore.Qt.StrongFocus)
         self.list_view.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        self.list_view.setFocus()
         self.list_view.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollPerPixel)
         self.list_view.verticalScrollBar().setSingleStep(20)
         self.list_view.setStyleSheet("""
@@ -66,6 +65,8 @@ class BookmarkDialog(QtWidgets.QDialog):
         self.list_view.doubleClicked.connect(self.load_and_close)
 
         self.list_view.installEventFilter(self)
+
+        self.list_view.setFocus()
 
 
     def check_scroll_position(self):

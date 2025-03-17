@@ -2,6 +2,8 @@
 import json
 
 from PyQt5 import QtWidgets, QtCore, QtGui
+from utils.settings import AppSettings
+
 
 class AyahSelectorDialog(QtWidgets.QDialog):
     play_requested = QtCore.pyqtSignal(int, int, int)
@@ -11,7 +13,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
     PLACEHOLDER_TEXT += "\n"
     PLACEHOLDER_TEXT += "أو أكتب s ثم كلمات البحث"
     PLACEHOLDER_TEXT += "\n للمزيد : Ctrl+Shift+H \n"
-    PLACEHOLDER_TEXT += "مثال a 255 \n a 255 260 \n s بحر"
+    PLACEHOLDER_TEXT += "مثال a 255 \n a 255 260 \n s لا اله الا الله"
 
 
     def __init__(self, notes_manager, parent=None):
@@ -20,6 +22,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         self.resize(250, 350)  # Set initial size but allow resizing
         self.notes_manager = notes_manager
         self.current_course_id = None
+        self.app_settings = AppSettings() 
         self.init_ui()
         # Connect the itemChanged signal so edits are handled properly
         self.model.itemChanged.connect(self.on_item_changed)
@@ -527,9 +530,14 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                 output.extend(["========================================================================",])
                 output.extend([v['text_uthmani'] for v in results])
         title = self.course_input.text()
+        last_dir = self.app_settings.get_last_directory()
         file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save Course Text", f"{title}.txt", "Text Files (*.txt)")
-        
+            self, "Save Course Text", 
+            f"{last_dir}/{title}.txt",
+            "Text Files (*.txt)"
+        )
+
+
         if file_path:
             try:
                 with open(file_path, 'w', encoding='utf-8') as f:
