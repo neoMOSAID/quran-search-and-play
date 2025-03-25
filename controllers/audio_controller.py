@@ -24,17 +24,31 @@ class AudioController:
         self.max_repeats = 0
         self.playing_range_max = 0
         self.playing_ayah_range = False
+        self.playing_basmalah = False
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
 
     def on_media_status_changed(self, status):
-        """
-        Monitor the media player's status. When the current media finishes,
-        trigger playing the next file in the sequence.
-        """
         from PyQt5.QtMultimedia import QMediaPlayer
         if status == QMediaPlayer.EndOfMedia:
-            # Delay a bit to ensure the player is ready for the next file.
-            QTimer.singleShot(100, self.play_next_file)
+            if self.playing_basmalah:
+                # Basmalah finished, now play the original ayah
+                self.playing_basmalah = False
+                file_path = self.sequence_files[self.pending_sequence_index]  # Get original file
+                # Extract surah and ayah from the pending file
+                current_surah = int(os.path.basename(file_path)[:3])
+                current_ayah = int(os.path.basename(file_path)[3:6])
+                
+                # Scroll to the ayah now
+                if self.parent.results_view.isVisible():
+                    self.parent._scroll_to_ayah(current_surah, current_ayah)
+
+                url = QUrl.fromLocalFile(file_path)
+                self.player.setMedia(QMediaContent(url))
+                self.player.play()  # Play the original ayah (no index increment yet)
+                self.current_sequence_index = self.pending_sequence_index + 1
+            else:
+                # Normal playback finished, proceed to next file
+                QTimer.singleShot(100, self.play_next_file)
 
     def stop_playback(self):
         """Stop any current audio playback."""
@@ -116,12 +130,35 @@ class AudioController:
             file_path = self.sequence_files[self.current_sequence_index]
             current_surah = int(os.path.basename(file_path)[:3])
             current_ayah = int(os.path.basename(file_path)[3:6])
+
+            # Check if Basmalah should be played
+            if current_ayah == 1 and current_surah != 9 and not self.playing_basmalah:
+                # Scroll to the ayah even before playing Basmalah
+                if self.parent.results_view.isVisible():
+                    self.parent._scroll_to_ayah(current_surah, current_ayah)
+                
+                audio_dir = get_audio_directory()
+                basmalah_path = os.path.join(audio_dir, f"{current_surah:03d}000.mp3")
+                if os.path.exists(basmalah_path):
+                    # Play Basmalah first
+                    self.playing_basmalah = True
+                    self.pending_sequence_index = self.current_sequence_index
+                    # Update status message
+                    chapter = self.search_engine.get_chapter_name(current_surah)
+                    self.parent.status_msg = f"<span dir='rtl'>إستماع إلى البسملة من سورة {chapter}</span>"
+                    # Load and play Basmalah
+                    url = QUrl.fromLocalFile(basmalah_path)
+                    self.player.setMedia(QMediaContent(url))
+                    self.player.play()
+                    return  # Exit without incrementing index
+
             chapter = self.search_engine.get_chapter_name(current_surah)
-            self.status_msg = f"<span dir='rtl' style='text-align: right'> إستماع إلى الآية {current_ayah}   من سورة {chapter}  {self.current_sequence_index+1}/{maxx}</span>"
+            
+            self.parent.status_msg = f"<span dir='rtl' style='text-align: right'> إستماع إلى الآية {current_ayah}   من سورة {chapter}  {self.current_sequence_index+1}/{maxx}</span>"
             if self.repeat_all or self.playing_range:
-                self.status_msg += " repeating"
+                self.parent.status_msg += " repeating"
                 if self.max_repeats > 0:
-                    self.status_msg += f" ({self.repeat_count+1}/{self.max_repeats}) "
+                    self.parent.status_msg += f" ({self.repeat_count+1}/{self.max_repeats}) "
             # Continue playing the current surah.
             url = QUrl.fromLocalFile(file_path)
             self.player.setMedia(QMediaContent(url))
@@ -198,8 +235,8 @@ class AudioController:
                     break
 
             if new_sequence_files:
-                self.handle_surah_selection(self.current_surah-1)
-                self.surah_combo.setCurrentIndex(self.current_surah - 1)
+                self.parent.handle_surah_selection(self.current_surah-1)
+                self.parent.surah_combo.setCurrentIndex(self.current_surah - 1)
                 self.sequence_files = new_sequence_files
                 self.current_sequence_index = 0
                 self.parent.showMessage(f"Moving to surah {self.current_surah}", 5000)

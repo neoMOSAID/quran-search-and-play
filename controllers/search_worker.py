@@ -18,19 +18,37 @@ class SearchWorker(QtCore.QThread):
 
     def run(self):
         try:
+
+            highlight_words = []
+            if self.parent.highlight_action.isChecked():
+                highlight_words = self.parent.highlight_words
+
             if self.method == "Text":
-                results = self.search_engine.search_verses(self.query,self.is_dark_theme)
+                results = self.search_engine.search_verses(
+                    self.query, 
+                    self.is_dark_theme,
+                    highlight_words
+                )
             elif self.method == "Surah":
                 if self.query.isdigit():
-                    results = self.search_engine.search_by_surah(int(self.query))
+                    results = self.search_engine.search_by_surah(int(self.query),
+                        self.is_dark_theme,
+                        highlight_words
+                    )
                 else:
                     results = []
             elif self.method == "Surah FirstAyah LastAyah":
                 parts = [int(p) for p in self.query.split() if p.isdigit()]
                 if len(parts) == 2:
-                    results = self.search_engine.search_by_surah_ayah(parts[0], parts[1])
+                    results = self.search_engine.search_by_surah_ayah(parts[0], parts[1],
+                        is_dark_theme=self.is_dark_theme,
+                        highlight_words=highlight_words
+                    )
                 elif len(parts) == 3:
-                    results = self.search_engine.search_by_surah_ayah(parts[0], parts[1], parts[2])
+                    results = self.search_engine.search_by_surah_ayah(parts[0], parts[1], parts[2],
+                        is_dark_theme=self.is_dark_theme,
+                        highlight_words=highlight_words
+                    )
                 else:
                     results = []
             else:
@@ -42,6 +60,7 @@ class SearchWorker(QtCore.QThread):
                     bullet = "<span style='font-size:32px;'>•</span> "
                     result['text_simplified'] = bullet + result['text_simplified']
                     result['text_uthmani'] = bullet + result['text_uthmani']
+                    
             self.results_ready.emit(results)
         except Exception as e:
             logging.exception("Error during search")

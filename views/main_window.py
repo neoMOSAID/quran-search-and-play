@@ -1,6 +1,7 @@
 
 import re
 import json
+import logging 
 
 from PyQt5 import QtWidgets, QtCore, QtGui
 from models.quran_model import QuranListModel
@@ -22,7 +23,7 @@ from views.dialogs.notes_dialog import NoteDialog
 from views.dialogs.data_transfer import DataTransferDialog
 from views.dialogs.help_dialog import HelpDialog
 
-
+from PyQt5.QtWidgets import QInputDialog
 # =============================================================================
 # Main application window
 # =============================================================================
@@ -42,6 +43,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.message_timer = QtCore.QTimer()
         self.message_timer.timeout.connect(self.revert_status_message)
 
+        self.highlight_action = None
+        self.highlight_color = "#FFD700"  # Gold color for highlighting
+        self.highlight_words = ["الله"]  # Default word
         self.results_count_int = 0
         self.pending_scroll = None  
         self.scroll_retries = 0
@@ -59,6 +63,10 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.setup_shortcuts()
         self.load_settings()
         self.trigger_initial_search()
+
+        self.model.loading_started.connect(self.handle_loading_started)
+        self.model.loading_progress.connect(self.handle_loading_progress)
+        self.model.loading_complete.connect(self.handle_loading_complete)
 
     def __del__(self):
         try:
@@ -203,6 +211,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Backspace"), self, activated=self.handle_backspace)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, activated=self.input_focus)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+D"), self, activated=self.toggle_theme)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+L"), self, 
+                            activated=self.configure_highlight_words)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+P"), self, activated=self.handle_ctrlp)
         #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+R"), self, activated=self.handle_ctrlr)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+R"), self, activated=self.handle_repeat_all_results)
@@ -331,11 +341,30 @@ class QuranBrowser(QtWidgets.QMainWindow):
         if self.detail_view.isVisible():
             self.detail_view.notes_widget.delete_note()
 
+    def handle_loading_started(self, total_results):
+        self.showMessage(f"Loading {total_results} results...", 0)  # 0 = indefinite
+
+    def handle_loading_progress(self, loaded, total, remaining):
+        self.showMessage(
+            f"Loaded {loaded} of {total} results ({remaining} remaining)", 
+            2500,  # Brief message
+            bg="#2196F3"  # Blue background for progress
+        )
+
+    def handle_loading_complete(self, total):
+        self.showMessage(f"All {total} results loaded!", 3000, bg="#4CAF50")
+
     def showMessage(self, message, timeout=3000, bg="#4CAF50"):
         """Temporarily override the left status label"""
         # Cancel any pending reverts
         self.message_timer.stop()
         
+        if timeout == 0:
+            self.temporary_message_active = True
+            self.result_count.setText(message)
+            self.result_count.setStyleSheet(f"background: {bg}; color: white;")
+            return
+
         # Store current permanent text if not already in override
         if not self.temporary_message_active:
             self.original_style = self.result_count.styleSheet()
@@ -425,6 +454,14 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.theme_action.toggled.connect(self.update_theme_style)
         menu.addAction(self.theme_action)
         
+        # Add highlight action after theme action
+        self.highlight_action = QtWidgets.QAction("Word Highlighting", self, checkable=True)
+        self.highlight_action.toggled.connect(self.toggle_highlighting)
+        menu.addAction(self.highlight_action)
+        
+        # Load highlight settings
+        self.load_highlight_settings()
+
         # Initialize delegate now that theme_action exists
         self.delegate = QuranDelegate(parent=self.results_view, 
                                     is_dark=self.theme_action.isChecked())
@@ -468,6 +505,32 @@ class QuranBrowser(QtWidgets.QMainWindow):
         exit_action.triggered.connect(self.close)
         menu.addAction(exit_action)
 
+
+    def load_highlight_settings(self):
+        enabled = self.settings.value("highlightEnabled", False, type=bool)
+        words = self.settings.value("highlightWords", "الله", type=str)
+        self.highlight_words = [w.strip() for w in words.split(",")]
+        self.highlight_action.setChecked(enabled)
+
+    def toggle_highlighting(self, enabled):
+        if enabled and not self.highlight_words:
+            self.configure_highlight_words()
+        self.settings.set("highlightEnabled", enabled)
+        
+        self.settings.set("highlightEnabled", enabled)
+        self.model.updateResults(self.model.results)  # Refresh view
+
+    def configure_highlight_words(self):
+        words, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Highlight Words",
+            "Enter comma-separated words to highlight:",
+            text=",".join(self.highlight_words)
+        )
+        if ok and words:
+            self.highlight_words = [w.strip() for w in words.split(",") if w.strip()]
+            self.settings.set("highlightWords", ",".join(self.highlight_words))
+            self.search()  # Refresh results with new words
 
     def export_notes(self):
         """Handles exporting notes to a CSV file with suggested filename."""
@@ -562,7 +625,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
             index = self.surah_combo.currentIndex()
         surah = index + 1
         try:
-            results = self.search_engine.search_by_surah(surah)
+            is_dark_theme = self.theme_action.isChecked()
+            results = self.search_engine.search_by_surah(surah, is_dark_theme, self.highlight_words)
             for result in results:
                 if self.notes_manager.has_note(result['surah'], result['ayah']):
                     #bullet = "◉ "  # smaller bullet than "●" "• "
@@ -820,17 +884,17 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 self.showMessage("Invalid repeat count", 2000, bg="red")
                 return
                 
-            self.max_repeats = count
-            self.repeat_count = 0
-            self.showMessage(f"Repeating {self.max_repeats} times", 3000)
+            self.audio_controller.max_repeats = count
+            self.audio_controller.repeat_count = 0
+            self.showMessage(f"Repeating {self.audio_controller.max_repeats} times", 3000)
         else:
             # Original infinite repeat behavior
-            self.max_repeats = 0  
-            self.repeat_count = 0
+            self.audio_controller.max_repeats = 0  
+            self.audio_controller.repeat_count = 0
             self.showMessage("Repeating all results continuously", 3000)
         
         # Common playback start logic
-        self.repeat_all = True
+        self.audio_controller.repeat_all = True
         self.audio_controller.play_all_results()
 
     def handle_ctrlw(self):

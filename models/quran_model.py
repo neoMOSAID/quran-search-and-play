@@ -1,7 +1,9 @@
 from PyQt5 import QtCore
 
 class QuranListModel(QtCore.QAbstractListModel):
-    loading_complete = QtCore.pyqtSignal()
+    loading_started = QtCore.pyqtSignal(int)  # Total results count
+    loading_progress = QtCore.pyqtSignal(int, int, int)  # Loaded, Total, Remaining
+    loading_complete = QtCore.pyqtSignal(int)  # Final count
     def __init__(self, results=None, parent=None):
         super().__init__(parent)
         self.results = results or []
@@ -42,20 +44,29 @@ class QuranListModel(QtCore.QAbstractListModel):
         self.endResetModel()
         # Schedule remaining results
         if len(results) > 50:
-            QtCore.QTimer.singleShot(100, lambda: self.load_remaining_results())
+            self.loading_started.emit(len(results))  # Emit total count
+            QtCore.QTimer.singleShot(50, lambda: self.load_remaining_results())
 
     def load_remaining_results(self):
-        """Force load next chunk immediately"""
         remaining = len(self.results) - self._displayed_results
         if remaining > 0:
-            batch_size = min(100, remaining)
+            batch_size = min(150, remaining)
             self.beginInsertRows(QtCore.QModelIndex(),
                                self._displayed_results,
                                self._displayed_results + batch_size - 1)
             self._displayed_results += batch_size
             self.endInsertRows()
-            self.loading_complete.emit()
-
+            
+            # Emit progress: loaded, total, remaining
+            self.loading_progress.emit(
+                self._displayed_results,
+                len(self.results),
+                len(self.results) - self._displayed_results
+            )
+            
+            QtCore.QTimer.singleShot(50, self.load_remaining_results)
+        else:
+            self.loading_complete.emit(len(self.results))
 
 
 class BookmarkModel(QtCore.QAbstractListModel):

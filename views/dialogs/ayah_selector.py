@@ -321,6 +321,9 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                         if data['type'] == 'ayah':
                             self.play_requested.emit(data['surah'], data['start'], data['end'])
                         elif data['type'] == 'search':
+                            idx = self.parent().search_method_combo.findText("Text", QtCore.Qt.MatchFixedString)
+                            if idx >= 0:
+                                self.parent().search_method_combo.setCurrentIndex(idx)
                             self.search_requested.emit(data['query'])
                 return True
             if event.key() == QtCore.Qt.Key_F2:
@@ -505,7 +508,14 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         self.model.insertRow(row2, item1)
         self.model.insertRow(row1, item2)
 
+
     def print_course(self):
+        import re
+
+        def strip_html_tags(text):
+            clean = re.compile('<.*?>')
+            return re.sub(clean, '', text)
+
         items = []
         for row in range(self.model.rowCount()):
             item = self.model.item(row)
@@ -514,29 +524,42 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                 items.append(data)
         
         output = []
+        title = self.course_input.text()
         search_engine = self.parent().search_engine
-        
+        output.extend(["",])
+        output.extend(["========================================================================",])
+        output.extend([f"درس: {title}",])
+        output.extend(["========================================================================",])
+
         for item in items:
             if item['type'] == 'ayah':
                 verses = search_engine.search_by_surah_ayah(
                     item['surah'], item['start'], item.get('end', item['start'])
                 )
-                output.extend([v['text_uthmani'] for v in verses])
+                # Add chapter name and ayah with text
                 output.extend(["========================================================================",])
+                for v in verses:
+                    chapter_name = search_engine.get_chapter_name(v['surah'])
+                    ayah_text = strip_html_tags(v['text_uthmani'])
+                    output.append(f"{chapter_name} - آية {v['ayah']}: {ayah_text}")
+                output.extend(["========================================================================",])
+                
             elif item['type'] == 'search':
                 results = search_engine.search_verses(item['query'])
                 output.extend(["========================================================================",])
                 output.extend([f"بحث عن : {item['query']}",])
                 output.extend(["========================================================================",])
-                output.extend([v['text_uthmani'] for v in results])
-        title = self.course_input.text()
+                for v in results:
+                    chapter_name = search_engine.get_chapter_name(v['surah'])
+                    ayah_text = strip_html_tags(v['text_uthmani'])
+                    output.append(f"{chapter_name} - آية {v['ayah']}: {ayah_text}")
+        
         last_dir = self.app_settings.get_last_directory()
         file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save Course Text", 
             f"{last_dir}/{title}.txt",
             "Text Files (*.txt)"
         )
-
 
         if file_path:
             try:
@@ -545,4 +568,3 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                 self.parent().showMessage(f"Course saved to {file_path}", 5000)
             except Exception as e:
                 self.parent().showMessage(f"Error saving file: {str(e)}", 5000, bg="red")
-

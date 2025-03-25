@@ -24,6 +24,8 @@ class QuranSearch:
         self._simplified = {}
         self._verse_counts = {}  # {surah: total_verses}
         self._load_data()
+        self.highlight_color = "#FFD700"  # Gold color for highlighting
+
 
     def _load_data(self):
         """Load all required data files from the quran_text package"""
@@ -70,17 +72,19 @@ class QuranSearch:
 
     @staticmethod
     def _normalize_hamza(text):
-        """Normalize different hamza forms"""
+        """Normalize all alif variants to standard ا"""
         replacements = {
             'إ': 'ا',
             'أ': 'ا',
             'آ': 'ا',
-            'ٱ': 'ا',  # Alef Wasla to Alef
-            'ء': '',   # Remove standalone hamza
-            'ئ': 'ي',  # Normalize hamza on ya
-            'ؤ': 'و',  # Normalize hamza on waw
+            'ٱ': 'ا',  # Alif Wasla
+            'ٰ': 'ا',  # Dagger alif (U+0670)
+            'ـ': '',   # Tatweel (removed completely)
+            'ء': '',   # Standalone hamza
+            'ئ': 'ي',
+            'ؤ': 'و',
             'ى': 'ي',
-            'ة': 'ه'
+            'ة': 'ه',
         }
         for orig, repl in replacements.items():
             text = text.replace(orig, repl)
@@ -88,19 +92,21 @@ class QuranSearch:
 
     @staticmethod
     def _remove_diacritics(text):
-        """Remove Arabic diacritical marks"""
-        return re.sub(r'[\u064B-\u065F\u0670\u06D6-\u06ED]', '', text)
-
+        """Remove all Arabic diacritics including extended ranges"""
+        return re.sub(
+            r'[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]',
+            '',
+            text
+        )
+        
     @staticmethod
     def _normalize_text(text=""):
-        """Full text normalization pipeline"""
+        """Full normalization including hamza and diacritics"""
         text = QuranSearch._remove_diacritics(text)
         text = QuranSearch._normalize_hamza(text)
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text
-
-    def search_verses(self, query, is_dark_theme=False):
-        """Search with whole-word highlighting"""
+        return text.strip()
+        
+    def search_verses(self, query, is_dark_theme=False, highlight_words=[]):
         normalized_query = self._normalize_text(query)
         results = []
         
@@ -108,9 +114,13 @@ class QuranSearch:
             if normalized_query in self._normalize_text(data['text']):
                 uthmani_text = self._uthmani.get((surah, ayah), {}).get('text', '')
                 
-                # Apply highlighting to both versions
-                highlighted_simplified = self.highlight(data['text'], query, is_dark_theme)
-                highlighted_uthmani = self.highlight(uthmani_text, query, is_dark_theme)
+                # Pass highlight_words to the highlight method
+                highlighted_simplified = self.highlight(
+                    data['text'], query, is_dark_theme, highlight_words
+                )
+                highlighted_uthmani = self.highlight(
+                    uthmani_text, query, is_dark_theme, highlight_words
+                )
                 
                 results.append({
                     'surah': surah,
@@ -164,30 +174,61 @@ class QuranSearch:
         
         return True, ""
     
-    def search_by_surah(self, surah):
-        """Retrieve all verses of a given Surah."""
+    def search_by_surah(self, surah,is_dark_theme=False, highlight_words=[]):
         results = []
+
+        """Retrieve all verses of a given Surah."""
         for ayah in range(1, self.get_verse_count(surah) + 1):
+            uthmani_text = self._uthmani.get((surah, ayah), {}).get('text', '')
+            simplified_text = self._simplified.get((surah, ayah), {}).get('text', '')
+            original_simplified_text = simplified_text
+            for word in highlight_words:
+                normalized_query = self._normalize_text(word)
+                if normalized_query in self._normalize_text(original_simplified_text):
+
+                    # Pass highlight_words to the highlight method
+                    simplified_text = self._highlight_search(
+                        simplified_text, word, is_dark_theme
+                    )
+                    uthmani_text = self._highlight_search(
+                        uthmani_text, word, is_dark_theme
+                    )
+                    
             results.append({
                 'surah': surah,
                 'ayah': ayah,
-                'text_simplified': self._simplified.get((surah, ayah), {}).get('text', ''),
-                'text_uthmani': self._uthmani.get((surah, ayah), {}).get('text', ''),
+                'text_simplified': simplified_text,
+                'text_uthmani': uthmani_text,
                 'chapter': self.get_chapter_name(surah)
             })
         return results
 
-    def search_by_surah_ayah(self, surah, first, last=None):
+    def search_by_surah_ayah(self, surah, first, last=None,is_dark_theme=False, highlight_words=[]):
         """Retrieve a specific verse by Surah and Ayah number."""
         results = []
         if last is None:
             last = first
         for ayah in range(first, last + 1):
+            uthmani_text = self._uthmani.get((surah, ayah), {}).get('text', '')
+            simplified_text = self._simplified.get((surah, ayah), {}).get('text', '')
+            original_simplified_text = simplified_text
+            for word in highlight_words:
+                normalized_query = self._normalize_text(word)
+                if normalized_query in self._normalize_text(original_simplified_text):
+
+                    # Pass highlight_words to the highlight method
+                    simplified_text = self._highlight_search(
+                        simplified_text, word, is_dark_theme
+                    )
+                    uthmani_text = self._highlight_search(
+                        uthmani_text, word, is_dark_theme
+                    )
+                    
             results.append({
                 'surah': surah,
                 'ayah': ayah,
-                'text_simplified': self._simplified.get((surah, ayah), {}).get('text', ''),
-                'text_uthmani': self._uthmani.get((surah, ayah), {}).get('text', ''),
+                'text_simplified': simplified_text,
+                'text_uthmani': uthmani_text,
                 'chapter': self.get_chapter_name(surah)
             })
         return results
@@ -268,24 +309,42 @@ class QuranSearch:
         """Get most frequently used words"""
         return self.get_all_simplified_words()[:limit]
 
-    def highlight(self, text, query, is_dark_theme=False):
-        """Smart highlighter that handles both single and multi-word queries"""
+    def highlight(self, text, query, is_dark_theme=False, highlight_words=[]):
+        """Updated highlight method with permanent word highlighting"""
+        # First highlight search matches
+        highlighted = self._highlight_search(text, query, is_dark_theme)
+        
+        # Then apply permanent word highlights
+        for word in highlight_words:
+            if word == query:
+                continue
+            highlighted = self._highlight_search(highlighted, word, is_dark_theme)
+        return highlighted
+
+    def _highlight_search(self, text, query, is_dark_theme):
+        # Existing highlight logic
         if ' ' in query.strip():
             return self.highlight_phrase(text, query, is_dark_theme)
         return self.highlight_word(text, query, is_dark_theme)
 
     def highlight_word(self, text, query, is_dark_theme):
-        """Original single-word highlighter"""
         highlight_color = "#FFFF00" if is_dark_theme else "#ff0000"
         normalized_query = self._normalize_text(query)
         
+        # Split on whitespace and preserve original word boundaries
         words = text.split()
-        for i, word in enumerate(words):
-            if normalized_query in self._normalize_text(word):
-                words[i] = f'<span style="font-weight: bold; color: {highlight_color};">{word}</span>'
+        highlighted = []
         
-        return ' '.join(words)
-
+        for original_word in words:
+            normalized_word = self._normalize_text(original_word)
+            if normalized_query == normalized_word:
+                highlighted.append(
+                    f'<span style="font-weight: bold; color: {highlight_color};">{original_word}</span>'
+                )
+            else:
+                highlighted.append(original_word)
+        
+        return ' '.join(highlighted)
 
     def highlight_phrase(self, text, query, is_dark_theme):
         """Highlights a multiword query phrase within the given Arabic text.
