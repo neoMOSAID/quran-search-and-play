@@ -2,7 +2,7 @@ import re
 import os, sys
 import importlib.resources
 import logging
-
+import unicodedata
 
 
 def resource_path(relative_path):
@@ -78,9 +78,8 @@ class QuranSearch:
             'أ': 'ا',
             'آ': 'ا',
             'ٱ': 'ا',  # Alif Wasla
-            'ٰ': 'ا',  # Dagger alif (U+0670)
-            'ـ': '',   # Tatweel (removed completely)
-            'ء': '',   # Standalone hamza
+            'ـ': '',   # Tatweel
+            #'ء': '',   # Standalone hamza removed
             'ئ': 'ي',
             'ؤ': 'و',
             'ى': 'ي',
@@ -91,20 +90,38 @@ class QuranSearch:
         return text
 
     @staticmethod
+    def replace_dagger_alif(text):
+        """
+        For dagger alif (ٰ), remove it when it occurs immediately before 'ن' 
+        (as in 'ٱلرَّحْمَـٰنِ' should become 'الرحمن'),
+        and in other contexts replace it with a regular 'ا'.
+        """
+        # Remove dagger alif when followed by ن (lookahead)
+        text = re.sub(r'ـ?ٰ(?=ن)', '', text)
+        # Replace remaining dagger alif with a regular alif
+        text = text.replace('ٰ', 'ا')
+        return text
+
+    @staticmethod
     def _remove_diacritics(text):
         """Remove all Arabic diacritics including extended ranges"""
-        return re.sub(
-            r'[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]',
-            '',
-            text
-        )
-        
-    @staticmethod
+        decomposed = unicodedata.normalize('NFKD', text)
+        filtered = ''.join(ch for ch in decomposed if not unicodedata.category(ch).startswith('M'))
+        return filtered
+    
+    @staticmethod   
     def _normalize_text(text=""):
-        """Full normalization including hamza and diacritics"""
+        # Replace dagger alif with a regular alif before diacritics are removed.
+        #text = text.replace('ٰ', 'ا')
+        text = QuranSearch.replace_dagger_alif(text)
+        # Remove diacritics (all mark characters).
         text = QuranSearch._remove_diacritics(text)
+        # Normalize various forms of alif and related characters.
         text = QuranSearch._normalize_hamza(text)
+        # Recompose to NFC to standardize the text.
+        text = unicodedata.normalize('NFC', text)
         return text.strip()
+
         
     def search_verses(self, query, is_dark_theme=False, highlight_words=[]):
         normalized_query = self._normalize_text(query)
@@ -316,7 +333,7 @@ class QuranSearch:
         
         # Then apply permanent word highlights
         for word in highlight_words:
-            if word == query:
+            if self._normalize_text(word) == self._normalize_text(query):
                 continue
             highlighted = self._highlight_search(highlighted, word, is_dark_theme)
         return highlighted
@@ -337,7 +354,7 @@ class QuranSearch:
         
         for original_word in words:
             normalized_word = self._normalize_text(original_word)
-            if normalized_query == normalized_word:
+            if normalized_query in normalized_word:
                 highlighted.append(
                     f'<span style="font-weight: bold; color: {highlight_color};">{original_word}</span>'
                 )
