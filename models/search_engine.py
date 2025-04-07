@@ -126,19 +126,20 @@ class QuranSearch:
     def search_verses(self, query, is_dark_theme=False, highlight_words=[]):
         normalized_query = self._normalize_text(query)
         results = []
-        
+        total_occurrences = 0  # Initialize total occurrences
+
         for (surah, ayah), data in self._simplified.items():
-            if normalized_query in self._normalize_text(data['text']):
+            normalized_text = self._normalize_text(data['text'])
+            if normalized_query in normalized_text:
+                # Count occurrences in this ayah
+                occurrences = normalized_text.count(normalized_query)
+                total_occurrences += occurrences
+
+                # Highlighting logic remains the same
                 uthmani_text = self._uthmani.get((surah, ayah), {}).get('text', '')
-                
-                # Pass highlight_words to the highlight method
-                highlighted_simplified = self.highlight(
-                    data['text'], query, is_dark_theme, highlight_words
-                )
-                highlighted_uthmani = self.highlight(
-                    uthmani_text, query, is_dark_theme, highlight_words
-                )
-                
+                highlighted_simplified = self.highlight(data['text'], query, is_dark_theme, highlight_words)
+                highlighted_uthmani = self.highlight(uthmani_text, query, is_dark_theme, highlight_words)
+
                 results.append({
                     'surah': surah,
                     'ayah': ayah,
@@ -147,7 +148,9 @@ class QuranSearch:
                     'chapter': self.get_chapter_name(surah)
                 })
         
-        return sorted(results, key=lambda x: (x['surah'], x['ayah']))
+        # Sort results by surah and ayah
+        results = sorted(results, key=lambda x: (x['surah'], x['ayah']))
+        return results, total_occurrences  # Return both results and occurrences
 
     def get_verse(self, surah, ayah, version='simplified'):
         """
@@ -259,6 +262,7 @@ class QuranSearch:
         :param ayah: Ayah number
         :return: List of dictionaries containing ayah details
         """
+        context_range = 12
         is_valid, error = self.validate_reference(surah, ayah)
         if not is_valid:
             return []
@@ -266,8 +270,8 @@ class QuranSearch:
         total_ayahs = self.get_verse_count(surah)
         
         # Define the range (max 5 before and 5 after)
-        start = max(1, ayah - 5)
-        end = min(total_ayahs, ayah + 5)
+        start = max(1, ayah - context_range)
+        end = min(total_ayahs, ayah + context_range)
 
         highlight_bg = "#F7E7A0"  # Soft Yellow
         highlight_text = "#000000"  # Black
@@ -345,15 +349,20 @@ class QuranSearch:
         return self.highlight_word(text, query, is_dark_theme)
 
     def highlight_word(self, text, query, is_dark_theme):
+        """Highlight entire words containing the query substring."""
         highlight_color = "#FFFF00" if is_dark_theme else "#ff0000"
+
         normalized_query = self._normalize_text(query)
         
-        # Split on whitespace and preserve original word boundaries
+        # Split text into words while preserving original whitespace
         words = text.split()
         highlighted = []
         
         for original_word in words:
+            # Normalize the current word
             normalized_word = self._normalize_text(original_word)
+            
+            # Check if query is a substring of the normalized word
             if normalized_query in normalized_word:
                 highlighted.append(
                     f'<span style="font-weight: bold; color: {highlight_color};">{original_word}</span>'
@@ -364,64 +373,86 @@ class QuranSearch:
         return ' '.join(highlighted)
 
     def highlight_phrase(self, text, query, is_dark_theme):
-        """Highlights a multiword query phrase within the given Arabic text.
-        
-        This version builds a mapping from each character in the original text
-        to the corresponding character in a normalized version that removes diacritics
-        and normalizes hamza, but does not collapse whitespace. This ensures that spaces
-        are preserved when matching multi-word queries such as 'الله يحب'.
-        """
-        # Choose highlight color based on theme.
-        highlight_color = "#FFFF00" if is_dark_theme else "#8b0000"
-        
-        # Define a per-character normalization that doesn't collapse spaces.
-        def normalize_char(c):
-            # Only remove diacritics and normalize hamza.
-            c = QuranSearch._remove_diacritics(c)
-            c = QuranSearch._normalize_hamza(c)
-            return c
-        
-        # Build the normalized text and an index mapping from each normalized character
-        # back to its position in the original text.
-        normalized_chars = []
-        index_mapping = []  # Each element will be the original text index.
-        for original_index, char in enumerate(text):
-            norm_char = normalize_char(char)
-            # Even if norm_char is empty (e.g. if the char was a diacritic), we skip it.
-            if not norm_char:
-                continue
-            for single_char in norm_char:
-                normalized_chars.append(single_char)
-                index_mapping.append(original_index)
-        normalized_text = "".join(normalized_chars)
-        
-        # Normalize the query using the full normalization pipeline.
-        # (This is fine because query normalization usually handles multi-word spacing correctly.)
+        """Highlight multi-word phrases while respecting word boundaries."""
+        highlight_color = "#FFFF00" if is_dark_theme else "#ff0000"
         normalized_query = self._normalize_text(query)
-        
-        result_parts = []
-        last_original_index = 0
-        search_index = 0
+        if not normalized_query:
+            return text
 
-        while True:
-            pos = normalized_text.find(normalized_query, search_index)
+        # Get word boundaries in the original text
+        word_boundaries = self._get_word_boundaries(text)
+        
+        # Normalize each character and build index mapping
+        normalized_chars = []
+        index_mapping = []
+        for idx, char in enumerate(text):
+            nc = self._normalize_char(char)
+            if nc:
+                for c in nc:
+                    normalized_chars.append(c)
+                    index_mapping.append(idx)
+        normalized_text = ''.join(normalized_chars)
+
+        result = []
+        last_highlight_end = 0
+        start_idx = 0
+
+        while start_idx <= len(normalized_text) - len(normalized_query):
+            # Find the next occurrence of the query
+            pos = normalized_text.find(normalized_query, start_idx)
             if pos == -1:
-                result_parts.append(text[last_original_index:])
                 break
-
-            # Map the match start back to the original text.
-            original_start = index_mapping[pos]
-            # Use the maximum original index covered by the normalized match.
-            original_end = max(index_mapping[pos: pos + len(normalized_query)]) + 1
-
-            # Append text before the match and then the highlighted match.
-            result_parts.append(text[last_original_index:original_start])
-            result_parts.append(f'<span style="font-weight: bold; color: {highlight_color};">{text[original_start:original_end]}</span>')
-
-            last_original_index = original_end
-            search_index = pos + len(normalized_query)
+            
+            end_pos = pos + len(normalized_query)
+            
+            # Map back to original text positions
+            match_start = index_mapping[pos]
+            match_end = index_mapping[end_pos - 1] + 1 if end_pos <= len(index_mapping) else len(text)
+            
+            # Find words overlapping with the match
+            overlapping = []
+            for (word_start, word_end) in word_boundaries:
+                if (word_start <= match_start < word_end) or \
+                   (word_start < match_end <= word_end) or \
+                   (match_start <= word_start and match_end >= word_end):
+                    overlapping.append((word_start, word_end))
+            
+            # Adjust highlight span to cover full words
+            if overlapping:
+                adj_start = min(ws for (ws, we) in overlapping)
+                adj_end = max(we for (ws, we) in overlapping)
+            else:
+                adj_start = match_start
+                adj_end = match_end
+            
+            # Add text before the highlight
+            if adj_start > last_highlight_end:
+                result.append(text[last_highlight_end:adj_start])
+            
+            # Add highlighted text
+            result.append(f'<span style="font-weight: bold; color: {highlight_color};">{text[adj_start:adj_end]}</span>')
+            last_highlight_end = adj_end
+            start_idx = end_pos  # Continue searching after current match
         
-        return "".join(result_parts)
+        # Add remaining text after last highlight
+        result.append(text[last_highlight_end:])
+        
+        return ''.join(result)
+
+    def _get_word_boundaries(self, text):
+        """Identify start/end indices of words in the original text."""
+        boundaries = []
+        for match in re.finditer(r'\S+', text):
+            start = match.start()
+            end = match.end()
+            boundaries.append((start, end))
+        return boundaries
+
+    def _normalize_char(self, char):
+        """Normalize a single character (helper for highlight_phrase)."""
+        char = self._remove_diacritics(char)
+        char = self._normalize_hamza(char)
+        return char
 
 
 class QuranWordCache:

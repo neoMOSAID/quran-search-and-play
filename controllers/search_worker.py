@@ -5,7 +5,7 @@ from PyQt5 import QtCore
 
 
 class SearchWorker(QtCore.QThread):
-    results_ready = QtCore.pyqtSignal(list)
+    results_ready = QtCore.pyqtSignal(str, list, int)
     error_occurred = QtCore.pyqtSignal(str)
 
     def __init__(self, search_engine, method, query, is_dark_theme, parent=None):
@@ -24,7 +24,7 @@ class SearchWorker(QtCore.QThread):
                 highlight_words = self.parent.highlight_words
 
             if self.method == "Text":
-                results = self.search_engine.search_verses(
+                results, total_occurrences = self.search_engine.search_verses(
                     self.query, 
                     self.is_dark_theme,
                     highlight_words
@@ -37,6 +37,7 @@ class SearchWorker(QtCore.QThread):
                     )
                 else:
                     results = []
+                total_occurrences = 0
             elif self.method == "Surah FirstAyah LastAyah":
                 parts = [int(p) for p in self.query.split() if p.isdigit()]
                 if len(parts) == 2:
@@ -51,9 +52,10 @@ class SearchWorker(QtCore.QThread):
                     )
                 else:
                     results = []
+                total_occurrences = 0
             else:
                 results = []
-            
+                total_occurrences = 0
             for result in results:
                 if self.parent.notes_manager.has_note(result['surah'], result['ayah']):
                     #bullet = "● "  # smaller bullet than "●"
@@ -61,7 +63,7 @@ class SearchWorker(QtCore.QThread):
                     result['text_simplified'] = bullet + result['text_simplified']
                     result['text_uthmani'] = bullet + result['text_uthmani']
                     
-            self.results_ready.emit(results)
+            self.results_ready.emit(self.method, results, total_occurrences)
         except Exception as e:
             logging.exception("Error during search")
             self.error_occurred.emit(str(e))

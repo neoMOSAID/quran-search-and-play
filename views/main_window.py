@@ -47,6 +47,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.highlight_color = "#FFD700"  # Gold color for highlighting
         self.highlight_words = ["الله"]  # Default word
         self.results_count_int = 0
+        self.total_occurrences = 0
         self.pending_scroll = None  
         self.scroll_retries = 0
         self.MAX_SCROLL_RETRIES = 5
@@ -67,6 +68,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.model.loading_started.connect(self.handle_loading_started)
         self.model.loading_progress.connect(self.handle_loading_progress)
         self.model.loading_complete.connect(self.handle_loading_complete)
+        
+        self.original_style = self.result_count.styleSheet()
 
     def __del__(self):
         try:
@@ -189,7 +192,6 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.detail_view.backRequested.connect(self.show_results_view)
         self.results_view.doubleClicked.connect(self.show_detail_view)
 
-
     @property
     def status_msg(self):
         return self._status_msg
@@ -201,9 +203,15 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
     def updatePermanentStatus(self):
         if not self.temporary_message_active:
-            self.result_count.setText(f"{self.results_count_int} نتائج، {self._status_msg}")
+            # Combine results count and status message
+            base = f"{self.results_count_int} نتائج"
+            if self.status_msg:
+                self.result_count.setText(f"{base}، {self.status_msg}")
+            elif self.total_occurrences:
+                self.result_count.setText(f"{base}،  تكررت {self.total_occurrences} مرة")
+            else:
+                self.result_count.setText(base)
             self.result_count.setStyleSheet("")
-
 
     def setup_shortcuts(self):
         QtWidgets.QShortcut(QtGui.QKeySequence("Space"), self, activated=self.handle_space)
@@ -750,10 +758,16 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.search_worker.error_occurred.connect(lambda error: self.showMessage(f"Search error: {error}", 3000, bg="red"))
         self.search_worker.start()
 
-    def handle_search_results(self, results):
+    def handle_search_results(self,method, results,total_occurrences):
         self.model.updateResults(results)
         self.results_count_int = len(results)
-        self.result_count.setText(f"Found {self.results_count_int} results")
+        self.result_count.setText(f"Found {self.results_count_int} results, {total_occurrences}")
+        self.total_occurrences = total_occurrences
+        if method == "Text":
+            self.status_msg = f" مرات {total_occurrences} تكرار"
+        else:
+            self.status_msg = ""  # Clear occurrences for non-text searches
+        
         if results:
             # Select and scroll to first result
             first_index = self.model.index(0)
@@ -1109,6 +1123,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.theme_action.setChecked(dark)
         # Apply the new theme.
         self.update_theme_style(dark)
+        # if self.results_view.isVisible():
+        #     self.results_view.viewport().update()
 
 
     def update_theme_style(self, dark):
