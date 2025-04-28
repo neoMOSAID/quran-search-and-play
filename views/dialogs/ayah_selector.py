@@ -335,18 +335,20 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                     data = item.data(QtCore.Qt.UserRole)
                     if data:
                         if data['type'] == 'ayah':
-                            # Load surah/ayah in main window
-                            self.parent().load_surah_from_current_ayah(
-                                data['surah'], 
-                                data['start']
-                            )
+                            # Load full ayah range in main window
+                            surah = data['surah']
+                            start = data['start']
+                            end = data.get('end', start)
+                            
+                            # Set search method and query
+                            self.parent().search_method_combo.setCurrentText("Surah FirstAyah LastAyah")
+                            self.parent().search_input.setText(f"{surah} {start} {end}")
+                            self.parent().search()
+                            
                             # Conditionally play audio
                             if self.play_on_enter:
-                                self.play_requested.emit(
-                                    data['surah'], 
-                                    data['start'], 
-                                    data.get('end', data['start'])
-                                )                            
+                                self.play_requested.emit(surah, start, end) 
+
                         elif data['type'] == 'search':
                             idx = self.parent().search_method_combo.findText("Text", QtCore.Qt.MatchFixedString)
                             if idx >= 0:
