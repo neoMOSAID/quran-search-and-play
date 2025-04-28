@@ -15,30 +15,46 @@ class NotesWidget(QtWidgets.QWidget):
 
     def init_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)  # No margins
+        layout.setSpacing(0)  # No spacing between elements
 
-        # Toolbar
-        toolbar = QtWidgets.QToolBar()
-        toolbar_layout = QtWidgets.QHBoxLayout()
-        toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(10)
+        # Toolbar with back button
+        toolbar = QtWidgets.QWidget()
+        toolbar_layout = QtWidgets.QHBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(2, 2, 2, 2)  # Minimal padding
+        toolbar_layout.setSpacing(5)  # Small spacing between buttons
 
-        self.new_button = QtWidgets.QAction(QtGui.QIcon.fromTheme("document-new"), "New", self)
-        self.save_button = QtWidgets.QAction(QtGui.QIcon.fromTheme("document-save"), "Save", self)
-        self.delete_button = QtWidgets.QAction(QtGui.QIcon.fromTheme("edit-delete"), "Delete", self)
-        toolbar.addAction(self.new_button)
-        toolbar.addAction(self.save_button)
-        toolbar.addAction(self.delete_button)
+        # Back button - first in toolbar
+        self.back_button = QtWidgets.QPushButton("← Back to Results")
+        self.back_button.setMinimumWidth(140)  # Wider than other buttons
+        self.back_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, 
+                                     QtWidgets.QSizePolicy.Fixed)
+        toolbar_layout.addWidget(self.back_button)
+
+        # Action buttons
+        self.new_button = QtWidgets.QToolButton()
+        self.new_button.setText("New")
+        self.save_button = QtWidgets.QToolButton()
+        self.save_button.setText("Save")
+        self.delete_button = QtWidgets.QToolButton()
+        self.delete_button.setText("Delete")
+
+        # Add buttons to toolbar
+        toolbar_layout.addWidget(self.new_button)
+        toolbar_layout.addWidget(self.save_button)
+        toolbar_layout.addWidget(self.delete_button)
 
         # Spacer to push the label to the right
         spacer = QtWidgets.QWidget()
-        spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
-        toolbar.addWidget(spacer)
+        spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, 
+                           QtWidgets.QSizePolicy.Preferred)
+        toolbar_layout.addWidget(spacer)
 
         # Add a small label for the notes list
         self.notes_label = QtWidgets.QLabel("تدبر الآية ")
         self.notes_label.setStyleSheet("font-size: 10pt; font-weight: bold; margin-right: 10px;")
         self.notes_label.setAlignment(QtCore.Qt.AlignVCenter)  # Vertically center the label
-        toolbar.addWidget(self.notes_label)
+        toolbar_layout.addWidget(self.notes_label)
 
         # Split view for notes list and editor
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
