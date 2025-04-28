@@ -22,6 +22,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         self.resize(250, 350)  # Set initial size but allow resizing
         self.notes_manager = notes_manager
         self.current_course_id = None
+        self.play_on_enter = True 
         self.app_settings = AppSettings() 
         self.init_ui()
         # Connect the itemChanged signal so edits are handled properly
@@ -76,8 +77,20 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         """)
 
         # Status label (for validation and course messages)
+        status_layout = QtWidgets.QHBoxLayout()
+
         self.status_label = QtWidgets.QLabel("")
-        layout.addWidget(self.status_label)
+        status_layout.addWidget(self.status_label)
+
+        # Play checkbox (right-aligned)
+        self.play_checkbox = QtWidgets.QCheckBox("تشغيل")
+        self.play_checkbox.setChecked(True)
+        self.play_checkbox.stateChanged.connect(self.handle_play_checkbox_change) 
+
+        status_layout.addStretch()
+        status_layout.addWidget(self.play_checkbox)
+        
+        layout.addLayout(status_layout)
 
         # Custom button layout: Save - New - OK
         button_layout = QtWidgets.QHBoxLayout()
@@ -85,8 +98,6 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         self.new_button = QtWidgets.QPushButton("New")  # Add new button
         ok_button = QtWidgets.QPushButton("OK")
 
-
-        
         button_layout.addWidget(self.save_button)
         button_layout.addWidget(self.new_button)       # Add New button
         button_layout.addStretch()                     # Pushes OK to right
@@ -108,6 +119,11 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         self.prev_button.clicked.connect(self.load_previous_course_and_focus)
         self.next_button.clicked.connect(self.load_next_course_and_focus)
 
+    def handle_play_checkbox_change(self, state):
+        """Handle checkbox state change and maintain list focus"""
+        self.play_on_enter = state == QtCore.Qt.Checked
+        self.list_view.setFocus() 
+        
     def on_double_click(self, index):
         """Handle double click to start editing"""
         if index.isValid():
@@ -319,7 +335,18 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                     data = item.data(QtCore.Qt.UserRole)
                     if data:
                         if data['type'] == 'ayah':
-                            self.play_requested.emit(data['surah'], data['start'], data['end'])
+                            # Load surah/ayah in main window
+                            self.parent().load_surah_from_current_ayah(
+                                data['surah'], 
+                                data['start']
+                            )
+                            # Conditionally play audio
+                            if self.play_on_enter:
+                                self.play_requested.emit(
+                                    data['surah'], 
+                                    data['start'], 
+                                    data.get('end', data['start'])
+                                )                            
                         elif data['type'] == 'search':
                             idx = self.parent().search_method_combo.findText("Text", QtCore.Qt.MatchFixedString)
                             if idx >= 0:
