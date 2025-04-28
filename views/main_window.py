@@ -670,7 +670,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         # Load the full surah using your search engine.
         try:
-            results = self.search_engine.search_by_surah(surah)
+            is_dark_theme = self.theme_action.isChecked()
+            results = self.search_engine.search_by_surah(surah, is_dark_theme, self.highlight_words)
             for result in results:
                 if self.notes_manager.has_note(result['surah'], result['ayah']):
                     #bullet = "◉ "  # smaller bullet than "●" "• "
@@ -1062,7 +1063,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 self.notes_manager.add_bookmark(result['surah'], result['ayah'])
                 self.showMessage("تم حفظ الآية في المرجعية", 2000)
                 if hasattr(self, 'bookmark_dialog'):
-                    self.bookmark_dialog.load_bookmarks()
+                    if self.bookmark_dialog:
+                        self.bookmark_dialog.load_bookmarks()
 
     def show_bookmarks(self):
         if not hasattr(self, 'bookmark_dialog') or not self.bookmark_dialog:
