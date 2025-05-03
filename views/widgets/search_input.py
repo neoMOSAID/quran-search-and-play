@@ -129,12 +129,35 @@ class SearchLineEdit(QtWidgets.QLineEdit):
         self.update_history_list()
 
     def keyPressEvent(self, event):
+        if self.completer.popup().isVisible():
+            if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+                # Get the selected index from the popup's filtered model
+                index = self.completer.popup().currentIndex()
+                if index.isValid():
+                    # Retrieve text from the completion model (filtered)
+                    selected_text = self.completer.completionModel().data(
+                        index, QtCore.Qt.DisplayRole
+                    )
+                    # Ignore the separator line
+                    if selected_text == "── Quran Words ──":
+                        return
+                    self.setText(selected_text)
+                    self.completer.popup().hide()
+                    self.returnPressed.emit()  # Trigger search
+                    return
+                else:
+                    event.ignore()
+                    return
+            # Let the completer handle navigation keys
+            super().keyPressEvent(event)
+            return
+
+        # Original history navigation handling
         if event.key() in (QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
             self.handle_history_navigation(event.key())
-        elif event.key() == QtCore.Qt.Key_Return or event.key() == QtCore.Qt.Key_Enter:
-            # Reset history index on search execution
+        elif event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
             self._history_index = -1
-            super().keyPressEvent(event) 
+            super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)
 

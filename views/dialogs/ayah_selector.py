@@ -22,7 +22,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         self.resize(250, 350)  # Set initial size but allow resizing
         self.notes_manager = notes_manager
         self.current_course_id = None
-        self.play_on_enter = True 
+        self.play_on_enter = False 
         self.app_settings = AppSettings() 
         self.init_ui()
         # Connect the itemChanged signal so edits are handled properly
@@ -84,7 +84,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
 
         # Play checkbox (right-aligned)
         self.play_checkbox = QtWidgets.QCheckBox("تشغيل")
-        self.play_checkbox.setChecked(True)
+        self.play_checkbox.setChecked(False)
         self.play_checkbox.stateChanged.connect(self.handle_play_checkbox_change) 
 
         status_layout.addStretch()
