@@ -1004,56 +1004,100 @@ class QuranBrowser(QtWidgets.QMainWindow):
         return False
 
 
-
     def add_ayah_to_course(self):
-        index = self.results_view.currentIndex()
-        if not index.isValid():
-            self.showMessage("No verse selected", 3000, bg="red")
+        selected = self.results_view.selectionModel().selectedIndexes()
+        if not selected:
+            self.showMessage("No verses selected", 3000, bg="red")
             return
-            
-        result = self.model.data(index, QtCore.Qt.UserRole)
-        try:
-            surah = int(result['surah'])
-            ayah = int(result['ayah'])
-        except (KeyError, ValueError):
-            self.showMessage("Invalid verse data", 3000, bg="red")
+
+        ayahs = []
+        for index in selected:
+            result = self.model.data(index, QtCore.Qt.UserRole)
+            if not result:
+                continue
+            try:
+                surah = int(result.get('surah'))
+                ayah = int(result.get('ayah'))
+                ayahs.append((surah, ayah))
+            except (KeyError, ValueError, TypeError):
+                continue
+
+        if not ayahs:
+            self.showMessage("No valid verses selected", 3000, bg="red")
             return
 
         dialog = CourseSelectionDialog(self.notes_manager, self)
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             course_id = dialog.get_selected_course()
             if course_id:
-                self._add_to_course(course_id, surah, ayah)
+                self._add_to_course(course_id, ayahs)
                 self.show_ayah_selector()
                 self.ayah_selector.load_course_by_id(course_id)
 
-    def _add_to_course(self, course_id, surah, ayah):
-        # Get existing course data
+    def _add_to_course(self, course_id, ayahs):
+        # Group ayahs by surah and find consecutive clusters
+        surah_groups = {}
+        for surah, ayah in ayahs:
+            if surah not in surah_groups:
+                surah_groups[surah] = []
+            surah_groups[surah].append(ayah)
+
+        # Process each surah group
+        entries = []
+        for surah, ayahs in surah_groups.items():
+            # Sort and find consecutive clusters
+            sorted_ayahs = sorted(ayahs)
+            clusters = []
+            current_start = sorted_ayahs[0]
+            current_end = sorted_ayahs[0]
+
+            for ayah in sorted_ayahs[1:]:
+                if ayah == current_end + 1:
+                    current_end = ayah
+                else:
+                    clusters.append((current_start, current_end))
+                    current_start = current_end = ayah
+            clusters.append((current_start, current_end))
+
+            # Create entries for clusters
+            for start, end in clusters:
+                entries.append({
+                    "surah": surah,
+                    "start": start,
+                    "end": end
+                })
+
+        # Add entries to course
         courses = self.notes_manager.get_all_courses()
         course = next((c for c in courses if c[0] == course_id), None)
         if not course:
             return
 
-        # Create new item entry
-        new_entry = {
-            "text": f"Surah {surah}: Ayah {ayah}",
-            "user_data": {
-                "type": "ayah",
-                "surah": surah,
-                "start": ayah,
-                "end": ayah
-            }
-        }
-
-        # Update course items
         _, title, items = course
         updated_items = items.copy()
-        updated_items.append(json.dumps(new_entry))
 
-        # Save updated course
+        for entry in entries:
+            surah = entry["surah"]
+            start = entry["start"]
+            end = entry["end"]
+            
+            text = f"Surah {surah}: Ayah {start}"
+            if end > start:
+                text += f" to {end}"
+
+            new_entry = {
+                "text": text,
+                "user_data": {
+                    "type": "ayah",
+                    "surah": surah,
+                    "start": start,
+                    "end": end
+                }
+            }
+            updated_items.append(json.dumps(new_entry))
+
         self.notes_manager.save_course(course_id, title, updated_items)
-        self.showMessage(f"Added to course: {title}", 3000)
-
+        self.showMessage(f"Added {len(entries)} entries to course: {title}", 3000)
 
     def bookmark_current_ayah(self):
         index = self.results_view.currentIndex()

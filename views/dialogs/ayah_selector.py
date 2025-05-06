@@ -13,7 +13,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
     PLACEHOLDER_TEXT += "\n"
     PLACEHOLDER_TEXT += "أو أكتب s ثم كلمات البحث"
     PLACEHOLDER_TEXT += "\n للمزيد : Ctrl+Shift+H \n"
-    PLACEHOLDER_TEXT += "مثال a 255 \n a 255 260 \n s لا اله الا الله"
+    PLACEHOLDER_TEXT += "مثال a 2 255 \n a 2 255 260 \n s لا اله الا الله"
 
 
     def __init__(self, notes_manager, parent=None):
@@ -537,7 +537,6 @@ class AyahSelectorDialog(QtWidgets.QDialog):
         self.model.insertRow(row2, item1)
         self.model.insertRow(row1, item2)
 
-
     def print_course(self):
         import re
 
@@ -562,16 +561,22 @@ class AyahSelectorDialog(QtWidgets.QDialog):
 
         for item in items:
             if item['type'] == 'ayah':
-                verses = search_engine.search_by_surah_ayah(
-                    item['surah'], item['start'], item.get('end', item['start'])
-                )
-                # Add chapter name and ayah with text
+                surah = item['surah']
+                start = item['start']
+                end = item.get('end', start)
+                verses = search_engine.search_by_surah_ayah(surah, start, end)
+                
+                # Collect all verse texts
+                verse_texts = [strip_html_tags(v['text_uthmani']) for v in verses]
+                
+                # Add reference to last verse
+                if verse_texts:
+                    chapter_name = search_engine.get_chapter_name(surah)
+                    range_info = f"آية {start}" if start == end else f"الآيات {start}-{end}"
+                    verse_texts[-1] += f" ({chapter_name} {range_info})"
+                
                 output.extend(["========================================================================",])
-                for v in verses:
-                    chapter_name = search_engine.get_chapter_name(v['surah'])
-                    ayah_text = strip_html_tags(v['text_uthmani'])
-                    output.append(f"{chapter_name} - آية {v['ayah']}: {ayah_text}")
-                output.extend(["========================================================================",])
+                output.extend(verse_texts)
                 
             elif item['type'] == 'search':
                 results = search_engine.search_verses(item['query'])
@@ -581,7 +586,7 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                 for v in results:
                     chapter_name = search_engine.get_chapter_name(v['surah'])
                     ayah_text = strip_html_tags(v['text_uthmani'])
-                    output.append(f"{chapter_name} - آية {v['ayah']}: {ayah_text}")
+                    output.append(f"{ayah_text} ({chapter_name} آية {v['ayah']})")
         
         last_dir = self.app_settings.get_last_directory()
         file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -597,3 +602,4 @@ class AyahSelectorDialog(QtWidgets.QDialog):
                 self.parent().showMessage(f"Course saved to {file_path}", 5000)
             except Exception as e:
                 self.parent().showMessage(f"Error saving file: {str(e)}", 5000, bg="red")
+                
