@@ -4,9 +4,9 @@ from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt
 
 class CourseSelectionDialog(QtWidgets.QDialog):
-    def __init__(self, notes_manager, parent=None):
+    def __init__(self, db, parent=None):
         super().__init__(parent)
-        self.notes_manager = notes_manager
+        self.db = db
         self.selected_course_id = None
         self.init_ui()
         self.load_courses()
@@ -46,7 +46,7 @@ class CourseSelectionDialog(QtWidgets.QDialog):
 
     def create_new_course(self):
         """Create a new course and refresh the list"""
-        new_id = self.notes_manager.create_new_course()
+        new_id = self.db.create_new_course()
         self.load_courses()
         
         # Select the new course
@@ -58,7 +58,7 @@ class CourseSelectionDialog(QtWidgets.QDialog):
 
     def load_courses(self):
         self.course_list.clear()
-        courses = self.notes_manager.get_all_courses()
+        courses = self.db.get_all_courses()
         for course_id, title, _ in courses:
             item = QtWidgets.QListWidgetItem(title)
             item.setData(Qt.UserRole, course_id)

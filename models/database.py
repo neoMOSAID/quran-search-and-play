@@ -6,7 +6,7 @@ import json
 from PyQt5.QtCore import QStandardPaths
 
 
-class NotesManager:
+class DbManager:
     def __init__(self):
         # Get the writable location for application data
         app_data_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
@@ -29,10 +29,12 @@ class NotesManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_surah_ayah ON notes (surah, ayah)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS courses (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL,
-                    items TEXT NOT NULL -- JSON-encoded list of items
-                )
+                    id INTEGER PRIMARY KEY,
+                    title TEXT,
+                    items TEXT,  
+                    created DATETIME,
+                    modified DATETIME
+                );
             """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS bookmarks (
@@ -170,15 +172,40 @@ class NotesManager:
             return count > 0
             
     def save_course(self, course_id, title, items):
-        items_json = json.dumps(items)
+        """Save course with new structure"""
         with sqlite3.connect(str(self.db_path)) as conn:
+            items_json = json.dumps(items)
             if course_id:
-                conn.execute("UPDATE courses SET title = ?, items = ? WHERE id = ?", (title, items_json, course_id))
+                conn.execute("""
+                    UPDATE courses SET 
+                        title = ?,
+                        items = ?,
+                        modified = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (title, items_json, course_id))
                 return course_id
             else:
-                cursor = conn.execute("INSERT INTO courses (title, items) VALUES (?, ?)", (title, items_json))
+                cursor = conn.execute("""
+                    INSERT INTO courses (title, items, created, modified)
+                    VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (title, items_json))
                 return cursor.lastrowid
-            
+
+    def get_course(self, course_id):
+        """Get course with full structure"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT title, items,created,modified FROM courses WHERE id = ?
+            """, (course_id,))
+            row = cursor.fetchone()
+            return {
+                'id': course_id,
+                'title': row[0],
+                'items': json.loads(row[1]),
+                'created': row[2],
+                'modified': row[3]
+            }
+                            
     def create_new_course(self, title=None):
         """Create a new empty course and return its ID"""
         if not title:

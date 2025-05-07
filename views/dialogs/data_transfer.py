@@ -131,21 +131,21 @@ class DataTransferDialog(QtWidgets.QDialog):
                 # Export courses
                 if data_type in ['courses', 'all']:
                     self.update_progress("Exporting courses...")
-                    courses = self.parent.notes_manager.get_all_courses()
+                    courses = self.db.get_all_courses()
                     zipf.writestr('courses.json', json.dumps(courses, ensure_ascii=False))
                     manifest['types'].append('courses')
 
                 # Export notes
                 if data_type in ['notes', 'all']:
                     self.update_progress("Exporting notes...")
-                    notes = self.parent.notes_manager.get_all_notes()
+                    notes = self.db.get_all_notes()
                     zipf.writestr('notes.json', json.dumps(notes, ensure_ascii=False))
                     manifest['types'].append('notes')
 
                 # Export bookmarks
                 if data_type in ['bookmarks', 'all']:
                     self.update_progress("Exporting bookmarks...")
-                    bookmarks = self.parent.notes_manager.get_all_bookmarks(self.parent.search_engine)
+                    bookmarks = self.db.get_all_bookmarks(self.parent.search_engine)
                     zipf.writestr('bookmarks.json', json.dumps(bookmarks, ensure_ascii=False))
                     manifest['types'].append('bookmarks')
 
@@ -200,8 +200,8 @@ class DataTransferDialog(QtWidgets.QDialog):
                         title = course[1]
                         items = course[2]  
 
-                        if not self.parent.notes_manager.course_exists(title, items):
-                            self.parent.notes_manager.save_course(None, title, items)
+                        if not self.db.course_exists(title, items):
+                            self.db.save_course(None, title, items)
                             self.update_progress(f"Added new course: {title}")
                         else:
                             self.update_progress(f"Skipped duplicate course: {title}")
@@ -212,8 +212,8 @@ class DataTransferDialog(QtWidgets.QDialog):
                     self.update_progress("Importing notes...")
                     notes = json.loads(zipf.read('notes.json').decode('utf-8'))
                     for note in notes:
-                        if not self.parent.notes_manager.note_exists(note['surah'], note['ayah'], note['content']):
-                            self.parent.notes_manager.add_note(note['surah'], note['ayah'], note['content'])
+                        if not self.db.note_exists(note['surah'], note['ayah'], note['content']):
+                            self.db.add_note(note['surah'], note['ayah'], note['content'])
                             self.update_progress(f"Added note for {note['surah']}:{note['ayah']}")
                 
                 # Import bookmarks
@@ -221,7 +221,7 @@ class DataTransferDialog(QtWidgets.QDialog):
                     self.update_progress("Importing bookmarks...")
                     bookmarks = json.loads(zipf.read('bookmarks.json').decode('utf-8'))
                     for bm in bookmarks:
-                        self.parent.notes_manager.add_bookmark(bm['surah'], bm['ayah'])
+                        self.db.add_bookmark(bm['surah'], bm['ayah'])
                         self.update_progress(f"Added bookmark for {bm['surah']}:{bm['ayah']}")
 
                 self.update_progress("Import completed successfully")

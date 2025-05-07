@@ -5,7 +5,7 @@ import logging
 
 from PyQt5 import QtWidgets, QtCore, QtGui
 from models.quran_model import QuranListModel
-from models.notes_manager import NotesManager
+from models.database import DbManager
 from models.search_engine import QuranSearch, QuranWordCache
 from controllers.search_worker import SearchWorker
 from controllers.audio_controller import AudioController
@@ -16,7 +16,7 @@ from views.detail_view import DetailView
 from views.delegates import QuranDelegate
 from views.dialogs.compact_help import CompactHelpDialog
 from views.dialogs.course import CourseSelectionDialog
-from views.dialogs.ayah_selector import AyahSelectorDialog
+from views.dialogs.course_manager import CourseManagerDialog
 from views.dialogs.bookmarks import BookmarkDialog
 from views.dialogs.notes_manager import NotesManagerDialog
 from views.dialogs.notes_dialog import NoteDialog
@@ -33,7 +33,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         icon_path = resource_path("icon.png")
         self.setWindowIcon(QtGui.QIcon(icon_path))
         self.search_engine = QuranSearch()
-        self.ayah_selector = None
+        self.course_dialog = None
         self.bookmark_dialog = None
         self.notes_dialog = None
         self.compact_help_dialog = None
@@ -54,7 +54,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         self.audio_controller = AudioController(self)
 
-        self.notes_manager = NotesManager()
+        self.db = DbManager()
 
         self.settings = AppSettings()
         self.theme_action = None
@@ -244,7 +244,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+P"), self, activated=self.audio_controller.play_all_results)
         QtWidgets.QShortcut(QtGui.QKeySequence("Left"), self, activated=self.navigate_surah_left)
         QtWidgets.QShortcut(QtGui.QKeySequence("Right"), self, activated=self.navigate_surah_right)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+T"), self, activated=self.show_ayah_selector)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+T"), self, activated=self.show_course_manager)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+T"), self, activated=self.add_ayah_to_course)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+B"), self, activated=self.show_bookmarks)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+B"), self, activated=self.bookmark_current_ayah)
@@ -332,7 +332,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
     def show_notes_manager(self):
         if not self.notes_dialog:
-            self.notes_dialog = NotesManagerDialog(self.notes_manager, self.search_engine, self)
+            self.notes_dialog = NotesManagerDialog(self.db, self.search_engine, self)
             self.notes_dialog.show_ayah_requested.connect(self.load_and_show_ayah)
         self.notes_dialog.show()
 
@@ -391,12 +391,19 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.status_msg = ""
         self.result_count.setStyleSheet(self.original_style)
 
-    def show_ayah_selector(self):
-        if not self.ayah_selector:
-            self.ayah_selector = AyahSelectorDialog(self.notes_manager, self)
-            self.ayah_selector.play_requested.connect(self.audio_controller.play_ayah_range)
-            self.ayah_selector.search_requested.connect(self.handle_course_search)
-        self.ayah_selector.show()
+    # def show_ayah_selector(self):
+    #     if not self.ayah_selector:
+    #         self.ayah_selector = AyahSelectorDialog(self.db, self)
+    #         self.ayah_selector.play_requested.connect(self.audio_controller.play_ayah_range)
+    #         self.ayah_selector.search_requested.connect(self.handle_course_search)
+    #     self.ayah_selector.show()
+
+    def show_course_manager(self):
+        if not hasattr(self, 'course_dialog') or not self.course_dialog:
+            self.course_dialog = CourseManagerDialog(self.db, self.search_engine, self)    
+            self.course_dialog.play_requested.connect(self.audio_controller.play_ayah_range)
+            self.course_dialog.search_requested.connect(self.handle_course_search)
+        self.course_dialog.show()
 
     def handle_course_search(self, query):
         self.search_input.setText(query)
@@ -443,7 +450,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         if not content:
             return
         
-        self.notes_manager.add_note(
+        self.db.add_note(
             self.note_dialog.surah,
             self.note_dialog.ayah,
             content
@@ -492,7 +499,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         # bookmark action
         course_action = QtWidgets.QAction("Course Manager", self)
-        course_action.triggered.connect(self.show_ayah_selector)
+        course_action.triggered.connect(self.show_course_manager)
         menu.addAction(course_action)
 
         # data export/import
@@ -563,7 +570,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 file_path += '.csv'
 
             try:
-                self.notes_manager.export_to_csv(file_path)
+                self.db.export_to_csv(file_path)
                 self.showMessage(f"Notes exported to {file_path}", 5000)
             except Exception as e:
                 self.showMessage(f"Export failed: {str(e)}", 5000, bg="red")
@@ -574,7 +581,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self, "Import Notes", "", "CSV Files (*.csv)")
         if file_path:
             try:
-                imported, duplicates, errors = self.notes_manager.import_from_csv(file_path)
+                imported, duplicates, errors = self.db.import_from_csv(file_path)
                 msg = f"Imported {imported} notes. Skipped {duplicates} duplicates. {errors} errors."
                 self.showMessage(msg, 7000)
 
@@ -636,7 +643,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             is_dark_theme = self.theme_action.isChecked()
             results = self.search_engine.search_by_surah(surah, is_dark_theme, self.highlight_words)
             for result in results:
-                if self.notes_manager.has_note(result['surah'], result['ayah']):
+                if self.db.has_note(result['surah'], result['ayah']):
                     #bullet = "◉ "  # smaller bullet than "●" "• "
                     bullet = "<span style='font-size:32px;'>•</span> "
                     result['text_simplified'] = bullet + result['text_simplified']
@@ -673,7 +680,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             is_dark_theme = self.theme_action.isChecked()
             results = self.search_engine.search_by_surah(surah, is_dark_theme, self.highlight_words)
             for result in results:
-                if self.notes_manager.has_note(result['surah'], result['ayah']):
+                if self.db.has_note(result['surah'], result['ayah']):
                     #bullet = "◉ "  # smaller bullet than "●" "• "
                     bullet = "<span style='font-size:32px;'>•</span> "
                     result['text_simplified'] = bullet + result['text_simplified']
@@ -1026,13 +1033,13 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.showMessage("No valid verses selected", 3000, bg="red")
             return
 
-        dialog = CourseSelectionDialog(self.notes_manager, self)
+        dialog = CourseSelectionDialog(self.db, self)
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             course_id = dialog.get_selected_course()
             if course_id:
                 self._add_to_course(course_id, ayahs)
-                self.show_ayah_selector()
-                self.ayah_selector.load_course_by_id(course_id)
+                self.show_course_manager()
+                self.course_dialog.load_course(course_id)
 
     def _add_to_course(self, course_id, ayahs):
         # Group ayahs by surah and find consecutive clusters
@@ -1068,7 +1075,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 })
 
         # Add entries to course
-        courses = self.notes_manager.get_all_courses()
+        courses = self.db.get_all_courses()
         course = next((c for c in courses if c[0] == course_id), None)
         if not course:
             return
@@ -1081,12 +1088,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
             start = entry["start"]
             end = entry["end"]
             
-            text = f"Surah {surah}: Ayah {start}"
-            if end > start:
-                text += f" to {end}"
-
             new_entry = {
-                "text": text,
+                "text": f"Surah {surah}: Ayah {start}-{end}" if start != end else f"Surah {surah}: Ayah {start}",
                 "user_data": {
                     "type": "ayah",
                     "surah": surah,
@@ -1094,9 +1097,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
                     "end": end
                 }
             }
-            updated_items.append(json.dumps(new_entry))
+            updated_items.append(new_entry)  
 
-        self.notes_manager.save_course(course_id, title, updated_items)
+        self.db.save_course(course_id, title, updated_items)
         self.showMessage(f"Added {len(entries)} entries to course: {title}", 3000)
 
     def bookmark_current_ayah(self):
@@ -1104,7 +1107,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         if index.isValid():
             result = self.model.data(index, QtCore.Qt.UserRole)
             if result:
-                self.notes_manager.add_bookmark(result['surah'], result['ayah'])
+                self.db.add_bookmark(result['surah'], result['ayah'])
                 self.showMessage("تم حفظ الآية في المرجعية", 2000)
                 if hasattr(self, 'bookmark_dialog'):
                     if self.bookmark_dialog:

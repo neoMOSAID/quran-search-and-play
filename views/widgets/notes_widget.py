@@ -1,12 +1,12 @@
 from PyQt5 import QtWidgets, QtGui, QtCore
-from models.notes_manager import NotesManager
+from models.database import DbManager
 from models.search_engine import QuranSearch
 
 class NotesWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.statusBar = lambda: self.window().statusBar()
-        self.notes_manager = NotesManager()
+        self.db = DbManager()
         self.current_surah = None
         self.current_ayah = None
         self.current_note_id = None
@@ -118,7 +118,7 @@ class NotesWidget(QtWidgets.QWidget):
 
     def load_notes(self):
         self.notes_list.clear()
-        notes = self.notes_manager.get_notes(self.current_surah, self.current_ayah)
+        notes = self.db.get_notes(self.current_surah, self.current_ayah)
         for note in notes:
             # Display first 80 characters as preview
             preview = note['content'][:80]
@@ -152,9 +152,9 @@ class NotesWidget(QtWidgets.QWidget):
             return
 
         if self.current_note_id:
-            self.notes_manager.update_note(self.current_note_id, content)
+            self.db.update_note(self.current_note_id, content)
         else:
-            self.notes_manager.add_note(self.current_surah, self.current_ayah, content)
+            self.db.add_note(self.current_surah, self.current_ayah, content)
 
         self.load_notes()
 
@@ -183,12 +183,12 @@ class NotesWidget(QtWidgets.QWidget):
             # Show dialog and handle response
             response = msg.exec_()
             if response == QtWidgets.QMessageBox.Yes:
-                self.notes_manager.delete_note(self.current_note_id)
+                self.db.delete_note(self.current_note_id)
                 self.load_notes()
                 self.statusBar().showMessage("Note deleted successfully", 2000)
 
     def delete_all_notes(self):
         if self.current_surah and self.current_ayah:
-            self.notes_manager.delete_all_notes(self.current_surah, self.current_ayah)
+            self.db.delete_all_notes(self.current_surah, self.current_ayah)
             self.load_notes()
 

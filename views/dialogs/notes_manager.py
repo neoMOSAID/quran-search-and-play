@@ -5,9 +5,9 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 class NotesManagerDialog(QtWidgets.QDialog):
     show_ayah_requested = QtCore.pyqtSignal(int, int)  # Surah, Ayah
 
-    def __init__(self, notes_manager, search_engine, parent=None):
+    def __init__(self, db, search_engine, parent=None):
         super().__init__(parent)
-        self.notes_manager = notes_manager
+        self.db = db
         self.search_engine = search_engine
         self.current_note = None
         self.init_ui()
@@ -87,7 +87,7 @@ class NotesManagerDialog(QtWidgets.QDialog):
 
     def load_notes(self):
         self.notes_list.clear()
-        notes = self.notes_manager.get_all_notes()
+        notes = self.db.get_all_notes()
         
         for note in notes:
             surah_name = self.search_engine.get_chapter_name(note['surah'])
@@ -117,7 +117,7 @@ class NotesManagerDialog(QtWidgets.QDialog):
         if self.current_note:
             new_content = self.note_content.toPlainText().strip()
             if new_content:
-                self.notes_manager.update_note(self.current_note['id'], new_content)
+                self.db.update_note(self.current_note['id'], new_content)
                 self.load_notes()
                 self.save_btn.setEnabled(False)
                 self.showMessage("تم حفظ التغييرات", 2000)
@@ -131,7 +131,7 @@ class NotesManagerDialog(QtWidgets.QDialog):
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
             )
             if confirm == QtWidgets.QMessageBox.Yes:
-                self.notes_manager.delete_note(self.current_note['id'])
+                self.db.delete_note(self.current_note['id'])
                 self.load_notes()
                 self.current_note = None
                 self.note_content.clear()

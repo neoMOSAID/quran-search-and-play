@@ -376,7 +376,7 @@ class AudioController:
             results = self.search_engine.search_by_surah_ayah(surah, start, end)
             if results:
                 for result in results:
-                    if self.parent.notes_manager.has_note(result['surah'], result['ayah']):
+                    if self.parent.db.has_note(result['surah'], result['ayah']):
                         #bullet = "◉ "  # smaller bullet than "●" "• "
                         bullet = "<span style='font-size:32px;'>•</span> "
                         result['text_simplified'] = bullet + result['text_simplified']

@@ -94,7 +94,7 @@ class BookmarkDialog(QtWidgets.QDialog):
             self.list_view.setCurrentIndex(index)
 
     def load_bookmarks(self):
-        bookmarks = self.parent.notes_manager.get_all_bookmarks(self.parent.search_engine)
+        bookmarks = self.parent.db.get_all_bookmarks(self.parent.search_engine)
         self.model.load_bookmarks(bookmarks)
         # Show first items immediately
         self.model._loaded_count = min(50, len(bookmarks))
@@ -116,7 +116,7 @@ class BookmarkDialog(QtWidgets.QDialog):
                 continue  # Prevent invalid access
                 
             bm = self.model.data(index, QtCore.Qt.UserRole)
-            self.parent.notes_manager.delete_bookmark(bm['surah'], bm['ayah'])
+            self.parent.db.delete_bookmark(bm['surah'], bm['ayah'])
             
             self.model.beginRemoveRows(QtCore.QModelIndex(), row, row)
             del self.model._bookmarks[row]

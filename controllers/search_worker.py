@@ -57,7 +57,7 @@ class SearchWorker(QtCore.QThread):
                 results = []
                 total_occurrences = 0
             for result in results:
-                if self.parent.notes_manager.has_note(result['surah'], result['ayah']):
+                if self.parent.db.has_note(result['surah'], result['ayah']):
                     #bullet = "● "  # smaller bullet than "●"
                     bullet = "<span style='font-size:32px;'>•</span> "
                     result['text_simplified'] = bullet + result['text_simplified']
