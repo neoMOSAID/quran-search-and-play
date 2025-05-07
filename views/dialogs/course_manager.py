@@ -642,6 +642,10 @@ class CourseManagerDialog(QtWidgets.QDialog):
             if event.key() == QtCore.Qt.Key_F2:
                 self.start_editing()
                 return True
+
+            if event.key() == QtCore.Qt.Key_Delete:
+                self.remove_item()
+                return True
                 
             # Handle navigation
             if event.key() == QtCore.Qt.Key_Left:
