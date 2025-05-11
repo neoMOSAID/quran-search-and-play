@@ -686,40 +686,55 @@ class CourseManagerDialog(QtWidgets.QDialog):
         output.extend(["",])
         output.extend(["========================================================================",])
         output.extend([f"درس: {title}",])
-        output.extend(["========================================================================",])
+        output.extend(["========================================================================", ""])
 
-        for item in items:
-            item = item['user_data']
-            if item['type'] == 'note':
-                output.extend([item['content']])
-            elif item['type'] == 'ayah':
-                surah = item['surah']
-                start = item['start']
+        for i in range(len(items)):
+            item_data = items[i]
+            item = item_data.get('user_data', {})
+            item_type = item.get('type', 'note')
+            
+            if item_type == 'note':
+                content = item.get('content', '')
+                lines = content.split('\n')
+                if lines:
+                    # Add bullet to first line
+                    output.append(f"● {lines[0].strip()}")
+                    # Add indented subsequent lines
+                    for line in lines[1:]:
+                        if line.strip():  # Skip empty lines
+                            output.append(f"  {line.strip()}")
+            elif item_type == 'ayah':
+                surah = item.get('surah')
+                start = item.get('start')
                 end = item.get('end', start)
                 verses = search_engine.search_by_surah_ayah(surah, start, end)
                 
-                # Collect all verse texts
-                verse_texts = [strip_html_tags(v['text_uthmani']) for v in verses]
-                
-                # Add reference to last verse
-                if verse_texts:
+                if verses:
                     chapter_name = search_engine.get_chapter_name(surah)
                     range_info = f"آية {start}" if start == end else f"الآيات {start}-{end}"
-                    verse_texts[-1] += f" ({chapter_name} {range_info})"
-                
+                    # Add star header
+                    text = "★ "
+                    # Add verses with individual ayah numbers
+                    for v in verses:
+                        v_text = strip_html_tags(v['text_uthmani'])
+                        text += f"{v_text} •  "
+                    text +=f" ({chapter_name} {range_info})"
+                    output.append(text)
+            elif item_type == 'search':
+                query = item.get('query', '')
+                results, _ = search_engine.search_verses(query)
                 output.extend(["========================================================================",])
-                output.extend(verse_texts)
-                
-            elif item['type'] == 'search':
-                results = search_engine.search_verses(item['query'])
-                output.extend(["========================================================================",])
-                output.extend([f"بحث عن : {item['query']}",])
-                output.extend(["========================================================================",])
+                output.extend([f"بحث عن : {query}",])
+                output.extend(["========================================================================", ""])
                 for v in results:
                     chapter_name = search_engine.get_chapter_name(v['surah'])
                     ayah_text = strip_html_tags(v['text_uthmani'])
-                    output.append(f"{ayah_text} ({chapter_name} آية {v['ayah']})")
-        
+                    output.append(f"{ayah_text} ({chapter_name} آية {v['ayah']})\n")
+            
+            # Add empty line after all item types except last
+            if i != len(items) - 1:
+                output.append('')
+
         last_dir = self.app_settings.get_last_directory()
         file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save Course Text", 
@@ -734,4 +749,5 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 self.parent().showMessage(f"Course saved to {file_path}", 5000)
             except Exception as e:
                 self.parent().showMessage(f"Error saving file: {str(e)}", 5000, bg="red")
+                
        
