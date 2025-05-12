@@ -3,7 +3,7 @@ import json
 
 from PyQt5 import QtCore, QtWidgets, QtGui
 from utils.settings import AppSettings
-
+from views.dialogs.select_course import CourseSelectionDialog
 
 class CourseItemDelegate(QtWidgets.QStyledItemDelegate):
     def __init__(self, parent=None):
@@ -16,7 +16,41 @@ class CourseItemDelegate(QtWidgets.QStyledItemDelegate):
         if not isinstance(item, dict):
             return super().paint(painter, option, index)
         
+        main_window = self.parent.main_window  # Dialog -> MainWindow
+        is_dark = False
+        if main_window and hasattr(main_window, 'theme_action'):
+            is_dark = main_window.theme_action.isChecked()
+
+        # # Set colors based on theme
+        # if (item.get('user_data') or {}).get('type') == 'note':
+        #     bg_color = QtGui.QColor('#3A4A3A') if is_dark else QtGui.QColor('#E8F5E9')
+        #     text_color = QtCore.Qt.white if is_dark else QtCore.Qt.black
+        # else:
+        #     bg_color = QtGui.QColor('#2D2D2D') if is_dark else QtGui.QColor('#FFFFFF')
+        #     text_color = QtCore.Qt.white if is_dark else QtCore.Qt.black
+
+        # Use system palette colors
+        palette = self.parent.palette()
+        bg_color = palette.color(QtGui.QPalette.Base)
+        text_color = palette.color(QtGui.QPalette.Text)
+        
+        # Override for notes
+        if (item.get('user_data') or {}).get('type') == 'note':
+            bg_color = QtGui.QColor('#3A4A3A') if is_dark else QtGui.QColor('#E8F5E9')
+            text_color = QtGui.QColor('#FFFFFF') if is_dark else QtGui.QColor('#000000')
+
         painter.save()
+        painter.fillRect(option.rect, bg_color)
+        painter.setPen(text_color)
+        
+        item_type = item.get('user_data', {}).get('type') or item.get('data', {}).get('type')
+        
+        # Set background color for notes
+        if item_type == 'note':
+            if is_dark:
+                painter.fillRect(option.rect, QtGui.QColor('#2a2a2a'))
+            else:
+                painter.fillRect(option.rect, QtGui.QColor('#C8E6C9'))
 
         # Set background color
         # bg_color = {
@@ -42,18 +76,30 @@ class CourseItemDelegate(QtWidgets.QStyledItemDelegate):
 
         # Draw text content
         text_rect = QtCore.QRect(option.rect.left() + 40, option.rect.top() + 5, 
-                               option.rect.width() - 45, option.rect.height() )
+                               option.rect.width() - 45, option.rect.height()  )
         painter.setPen(QtCore.Qt.black)
         painter.drawText(text_rect, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter | QtCore.Qt.TextWordWrap,
                      self._get_preview_text(item))
 
         painter.restore()
 
+    # def sizeHint(self, option, index):
+    #     # Get base size from superclass
+    #     sh = super().sizeHint(option, index)
+        
+    #     # Add extra height based on font metrics
+    #     font = self.parent.list_view.font()
+    #     fm = QtGui.QFontMetrics(font)
+    #     sh.setHeight(fm.height() * 2 )  # 2 lines + padding
+    #     return sh
+
     def _get_preview_text(self, item):
         data = item.get('data') or item.get('user_data')
         item_type = data.get('type','ayah')
         if item_type == 'note':
-            return f"...{data['content'][:30]}"
+            content = data.get('content','')
+            first_line = content.split('\n')[0].strip()
+            return f"...{first_line[:30]}"
         elif item_type == 'ayah':
             surah = data.get('surah') 
             start = data.get('start') 
@@ -191,13 +237,32 @@ class CourseManagerDialog(QtWidgets.QDialog):
     def __init__(self, db, search_engine, parent=None):
         super().__init__(parent)
         self.db = db
+        self.main_window = parent
         self.search_engine = search_engine
         self.app_settings = AppSettings() 
         self.current_course = None
         self.preview_was_visible = False
+        self.unsaved_changes = False
+        self.original_title = ""
         self.init_ui()
         self.load_initial_courses() 
         self.list_view.setFocus() 
+
+        # Add model change listeners
+        self.model.dataChanged.connect(self.handle_model_changed)
+        self.model.rowsInserted.connect(self.handle_model_changed)
+        self.model.rowsRemoved.connect(self.handle_model_changed)
+        self.main_window.theme_action.toggled.connect(self.handle_theme_change)
+
+
+    def handle_model_changed(self):
+        self.mark_unsaved()
+
+    def handle_theme_change(self, dark):
+        # Refresh list view styling
+        self.list_view.style().unpolish(self.list_view)
+        self.list_view.style().polish(self.list_view)
+        self.list_view.update()
 
     def init_ui(self):
         self.setWindowTitle("دروس القرآن")
@@ -238,14 +303,52 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.list_view.setAcceptDrops(True)
         self.list_view.setDropIndicatorShown(True)
         self.list_view.setLayoutDirection(QtCore.Qt.RightToLeft)
+        # self.list_view.setStyleSheet("""
+        #     QListView {
+        #         font-family: 'Amiri';
+        #         font-size: 14pt;
+        #         padding-right: 10px;
+        #         text-align: right;
+        #     }
+        # """)
+
         self.list_view.setStyleSheet("""
             QListView {
                 font-family: 'Amiri';
                 font-size: 14pt;
                 padding-right: 10px;
                 text-align: right;
+                alternate-background-color: #FFFFFF;
+            }
+            QListView::item {
+                border-bottom: 1px solid #DDD;
+                padding: 4px;
+            }
+            QListView::item:selected {
+                background: #0078D4;
+                color: white;
             }
         """)
+        # Add dark mode variant
+        if self.main_window and self.main_window.theme_action.isChecked():
+            self.list_view.setStyleSheet("""
+                QListView {
+                    font-family: 'Amiri';
+                    font-size: 14pt;
+                    padding-right: 10px;
+                    text-align: right;
+                    color: #FFFFFF;
+                }
+                QListView::item {
+                    border-bottom: 1px solid #DDD;
+                    padding: 4px;
+                    background: #ff0000;
+                }
+                QListView::item:selected {
+                    background: #ff0000;
+                }
+            """)
+
 
         self.preview_edit = QtWidgets.QTextEdit()
         self.preview_edit.setReadOnly(True)
@@ -326,6 +429,10 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.print_btn = QtWidgets.QPushButton("Print")
         self.print_btn.clicked.connect(self.print_course)
 
+        self.open_btn = QtWidgets.QPushButton("Open")  # New button
+        self.open_btn.clicked.connect(self.open_course_selection)  # Connect handler
+
+        dialog_btn.addButton(self.open_btn, QtWidgets.QDialogButtonBox.ActionRole)
         dialog_btn.addButton(self.print_btn, QtWidgets.QDialogButtonBox.ActionRole)
 
         # Compact styling
@@ -363,9 +470,14 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.list_view.selectionModel().currentChanged.connect(self.handle_selection_changed)
         self.preview_edit.textChanged.connect(self.handle_text_edit)
         self.preview_check.toggled.connect(self.on_preview_toggled)
+        self.title_edit.textChanged.connect(self.handle_title_changed)
 
         self.setLayout(layout)
 
+    def showEvent(self, event):
+        """Refresh view when dialog is shown to catch theme changes"""
+        self.list_view.viewport().update()
+        super().showEvent(event)
 
     def load_initial_courses(self):
         """Load first course or create new one"""
@@ -378,6 +490,29 @@ class CourseManagerDialog(QtWidgets.QDialog):
             self.current_course = self.db.get_course(course_id)
         self.update_navigation_buttons()
 
+    def open_course_selection(self):
+        """Handle opening course selection dialog"""
+        if self.unsaved_changes:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                'Unsaved Changes',
+                'Save changes before opening another course?',
+                QtWidgets.QMessageBox.Save | 
+                QtWidgets.QMessageBox.Discard |
+                QtWidgets.QMessageBox.Cancel
+            )
+            
+            if reply == QtWidgets.QMessageBox.Cancel:
+                return
+            elif reply == QtWidgets.QMessageBox.Save:
+                self.save_course()
+        
+        dialog = CourseSelectionDialog(self.db, self)
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            course_id = dialog.get_selected_course()
+            if course_id:
+                self.load_course(course_id)
+
     def load_course(self, course_id):
         """Load a course by ID with proper item deserialization"""
         if not course_id:
@@ -385,6 +520,10 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.current_course = self.db.get_course(course_id)
         self.title_edit.setText(self.current_course['title'])
         self.model.clear()
+        self.unsaved_changes = False
+        if self.current_course:
+            self.original_title = self.current_course['title']
+        self.update_window_title()
         
         for item in self.current_course['items']:
             # Handle legacy string format if needed
@@ -406,6 +545,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
         list_item.setData(item, QtCore.Qt.UserRole)
         list_item.setEditable(False)
         self.model.appendRow(list_item)
+        self.mark_unsaved()
 
     def add_note(self):
         new_note = {
@@ -425,6 +565,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
         index = self.model.index(self.model.rowCount()-1, 0)
         self.list_view.setCurrentIndex(index)
         self.list_view.scrollTo(index)
+        self.mark_unsaved()
 
     def add_ayah_range(self, surah, start, end):
         ayah_item = {
@@ -450,6 +591,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
         index = self.list_view.currentIndex()
         if index.isValid():
             self.model.removeRow(index.row())
+        self.mark_unsaved()
 
     def move_item(self, direction):
         row = self.list_view.currentIndex().row()
@@ -457,6 +599,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
             item = self.model.takeRow(row)
             self.model.insertRow(row + direction, item)
             self.list_view.setCurrentIndex(self.model.index(row + direction, 0))
+        self.mark_unsaved()
 
     def save_course(self):
         items = []
@@ -470,10 +613,13 @@ class CourseManagerDialog(QtWidgets.QDialog):
             course_id = self.current_course['id']
         else:
             course_id = None
-            
+      
         new_id = self.db.save_course(course_id, course_title, items)
         self.current_course = self.db.get_course(new_id)
         self.course_modified.emit()
+        self.unsaved_changes = False
+        self.original_title = self.title_edit.text()
+        self.update_window_title()
 
     def load_previous_course(self):
         if not self.current_course:
@@ -521,6 +667,24 @@ class CourseManagerDialog(QtWidgets.QDialog):
                     self.preview_edit.hide()
                     self.resize(250, 350) 
 
+    def handle_title_changed(self, text):
+        if text != self.original_title:
+            self.unsaved_changes = True
+            self.update_window_title()
+
+    def update_window_title(self):
+        title = "Course Manager"
+        if self.current_course:
+            title += f" - {self.current_course['title']}"
+        if self.unsaved_changes:
+            title += " *"
+        self.setWindowTitle(title)
+
+    def mark_unsaved(self):
+        if not self.unsaved_changes:
+            self.unsaved_changes = True
+            self.update_window_title()
+
     def handle_enter_key(self):
         index = self.list_view.currentIndex()
         if index.isValid():
@@ -565,9 +729,13 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.current_item = data        
         # Set preview content based on item type
         if item_type == 'note':
+            content = data.get('user_data', {}).get('content', '')
+            first_line = content.split('\n')[0].strip() if content else ''
+            preview = f"...{first_line[:30]}"
+            item.setText(preview)
             if not self.preview_edit.isVisible():
                 self.preview_edit.show()
-            self.preview_edit.setPlainText(data.get('user_data', {}).get('content', ''))
+            self.preview_edit.setPlainText(content)
             self.preview_edit.setReadOnly(False)
             return
         else:

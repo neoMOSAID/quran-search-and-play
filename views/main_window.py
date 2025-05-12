@@ -15,7 +15,7 @@ from views.widgets.search_input import SearchLineEdit
 from views.detail_view import DetailView
 from views.delegates import QuranDelegate
 from views.dialogs.compact_help import CompactHelpDialog
-from views.dialogs.course import CourseSelectionDialog
+from views.dialogs.select_course import CourseSelectionDialog
 from views.dialogs.course_manager import CourseManagerDialog
 from views.dialogs.bookmarks import BookmarkDialog
 from views.dialogs.notes_manager import NotesManagerDialog
@@ -218,7 +218,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Escape"), self, activated=self.toggle_version)
         QtWidgets.QShortcut(QtGui.QKeySequence("Backspace"), self, activated=self.handle_backspace)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, activated=self.input_focus)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+D"), self, activated=self.toggle_theme)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+F"), self, activated=self.handle_ctrlsf)
+        #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+D"), self, activated=self.toggle_theme)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+L"), self, 
                             activated=self.configure_highlight_words)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+P"), self, activated=self.handle_ctrlp)
@@ -231,22 +232,22 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+W"), self, activated=self.handle_ctrlsw)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+A"), self.results_view, activated=self.audio_controller.play_current_surah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+M"), self, activated=self.backto_current_surah)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+H"), self, activated=self.show_help_dialog)
+        #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+H"), self, activated=self.show_help_dialog)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+H"), self, activated=self.show_compact_help)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+J"), self, activated=self.handle_ctrlj)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+K"), self, 
                             activated=self.audio_controller.load_surah_from_current_playback)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+N"), self, activated=self.new_note)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+N"), self, activated=self.show_notes_manager)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+E"), self, activated=self.show_data_transfer)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+I"), self, activated=self.show_data_transfer)
+        #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+N"), self, activated=self.show_notes_manager)
+        #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+E"), self, activated=self.show_data_transfer)
+        #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+I"), self, activated=self.show_data_transfer)
         QtWidgets.QShortcut(QtGui.QKeySequence("Delete"), self, activated=self.delete_note)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+P"), self, activated=self.audio_controller.play_all_results)
         QtWidgets.QShortcut(QtGui.QKeySequence("Left"), self, activated=self.navigate_surah_left)
         QtWidgets.QShortcut(QtGui.QKeySequence("Right"), self, activated=self.navigate_surah_right)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+T"), self, activated=self.show_course_manager)
+        #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+T"), self, activated=self.show_course_manager)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+T"), self, activated=self.add_ayah_to_course)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+B"), self, activated=self.show_bookmarks)
+        #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+B"), self, activated=self.show_bookmarks)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+B"), self, activated=self.bookmark_current_ayah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+="), self, activated=self.increase_font_size)  # Ctrl++
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl++"), self, activated=self.increase_font_size) 
@@ -465,15 +466,67 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
     def setup_menu(self):
         menu = self.menuBar().addMenu("&Menu")
+        
+        # Dark Mode (Ctrl+D)
         self.theme_action = QtWidgets.QAction("Dark Mode", self, checkable=True)
+        self.theme_action.setShortcut(QtGui.QKeySequence("Ctrl+D"))
         self.theme_action.toggled.connect(self.update_theme_style)
         menu.addAction(self.theme_action)
         
-        # Add highlight action after theme action
+        # Highlighting (Ctrl+Shift+L)
         self.highlight_action = QtWidgets.QAction("Word Highlighting", self, checkable=True)
+        self.highlight_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+L"))
         self.highlight_action.toggled.connect(self.toggle_highlighting)
         menu.addAction(self.highlight_action)
-        
+
+        # Audio Directory (Ctrl+Shift+A)
+        audio_dir_action = QtWidgets.QAction("Set Audio Directory", self)
+        audio_dir_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+A"))
+        audio_dir_action.triggered.connect(self.audio_controller.choose_audio_directory)
+        menu.addAction(audio_dir_action)
+
+        # Bookmarks (Ctrl+Shift+B)
+        bookmark_action = QtWidgets.QAction("Bookmark Manager", self)
+        bookmark_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+B"))
+        bookmark_action.triggered.connect(self.show_bookmarks)
+        menu.addAction(bookmark_action)
+
+        # Notes Manager (Ctrl+Shift+N)
+        notes_action = QtWidgets.QAction("Notes Manager", self)
+        notes_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+N"))
+        notes_action.triggered.connect(self.show_notes_manager)
+        menu.addAction(notes_action)
+
+        # Course Manager (Ctrl+Shift+T)
+        course_action = QtWidgets.QAction("Course Manager", self)
+        course_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+T"))
+        course_action.triggered.connect(self.show_course_manager)
+        menu.addAction(course_action)
+
+        # Data Transfer (Ctrl+Shift+E)
+        data_transfer_action = QtWidgets.QAction("Data Transfer", self)
+        data_transfer_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+E"))
+        data_transfer_action.triggered.connect(self.show_data_transfer)
+        menu.addAction(data_transfer_action)
+
+        # Help (Ctrl+Shift+H)
+        help_action = QtWidgets.QAction("Help", self)
+        help_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+H"))
+        help_action.triggered.connect(self.show_help_dialog)
+        menu.addAction(help_action)
+
+        # About (Ctrl+I)
+        about_action = QtWidgets.QAction("About", self)
+        about_action.setShortcut(QtGui.QKeySequence("Ctrl+I"))
+        about_action.triggered.connect(self.about_dialog)
+        menu.addAction(about_action)
+
+        # Exit (Ctrl+Q)
+        exit_action = QtWidgets.QAction("Exit", self)
+        exit_action.setShortcut(QtGui.QKeySequence("Ctrl+Q"))
+        exit_action.triggered.connect(self.close)
+        menu.addAction(exit_action)
+ 
         # Load highlight settings
         self.load_highlight_settings()
 
@@ -481,44 +534,6 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.delegate = QuranDelegate(parent=self.results_view, 
                                     is_dark=self.theme_action.isChecked())
         self.results_view.setItemDelegate(self.delegate)
-
-        # New action: Set Audio Directory.
-        audio_dir_action = QtWidgets.QAction("Set Audio Directory", self)
-        audio_dir_action.triggered.connect(self.audio_controller.choose_audio_directory)
-        menu.addAction(audio_dir_action)
-
-        # bookmark action
-        bookmark_action = QtWidgets.QAction("Bookmark Manager", self)
-        bookmark_action.triggered.connect(self.show_bookmarks)
-        menu.addAction(bookmark_action)
-
-        # notes manager
-        notes_action = QtWidgets.QAction("Notes Manager", self)
-        notes_action.triggered.connect(self.show_notes_manager)
-        menu.addAction(notes_action)
-
-        # bookmark action
-        course_action = QtWidgets.QAction("Course Manager", self)
-        course_action.triggered.connect(self.show_course_manager)
-        menu.addAction(course_action)
-
-        # data export/import
-        data_transfer_action = QtWidgets.QAction("Data Transfer", self)
-        data_transfer_action.triggered.connect(self.show_data_transfer)
-        menu.addAction(data_transfer_action)
-
-        # Add About action
-        about_action = QtWidgets.QAction("About", self)
-        about_action.triggered.connect(self.about_dialog)
-        menu.addAction(about_action)
-        # Add Help action
-        help_action = QtWidgets.QAction("Help", self)
-        help_action.triggered.connect(self.show_help_dialog)
-        menu.addAction(help_action)
-        # Exit action
-        exit_action = QtWidgets.QAction("Exit", self)
-        exit_action.triggered.connect(self.close)
-        menu.addAction(exit_action)
 
 
     def load_highlight_settings(self):
@@ -919,6 +934,25 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.audio_controller.repeat_all = True
         self.audio_controller.play_all_results()
 
+    def handle_ctrlsf(self):
+        """Handle Ctrl+shift+f: Set search method to text and focus search input"""
+        try:
+            # Set search method to "text"
+            index = self.search_method_combo.findText("text", QtCore.Qt.MatchFixedString)
+            if index >= 0:
+                self.search_method_combo.setCurrentIndex(index)
+
+            # Focus and select all text in search input
+            self.search_input.setFocus()
+            self.search_input.selectAll()
+
+            # Optional: Trigger search if needed
+            # self.search()
+
+        except Exception as e:
+            logging.error(f"Error in handle_ctrlsf: {str(e)}")
+            self.showMessage("Error changing search mode", 3000, bg="red")
+
     def handle_ctrlw(self):
         """Handle Ctrl+Z: Set search method to Surah and focus search input"""
         try:
@@ -1012,6 +1046,20 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
 
     def add_ayah_to_course(self):
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            'Unsaved Changes',
+            'You have unsaved changes in the course manager. Save changes first?',
+            QtWidgets.QMessageBox.Save | 
+            QtWidgets.QMessageBox.Discard |
+            QtWidgets.QMessageBox.Cancel
+        )
+        
+        if reply == QtWidgets.QMessageBox.Cancel:
+            return
+        elif reply == QtWidgets.QMessageBox.Save:
+            self.course_dialog.save_course()
+            
         selected = self.results_view.selectionModel().selectedIndexes()
         if not selected:
             self.showMessage("No verses selected", 3000, bg="red")

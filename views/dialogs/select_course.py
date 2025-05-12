@@ -1,4 +1,4 @@
-
+### ./views/dialogs/select_course.py ###
 
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt
@@ -30,6 +30,11 @@ class CourseSelectionDialog(QtWidgets.QDialog):
         self.new_btn.clicked.connect(self.create_new_course)
         button_layout.addWidget(self.new_btn)
         
+        # Delete Course button
+        self.delete_btn = QtWidgets.QPushButton("Delete")
+        self.delete_btn.clicked.connect(self.delete_course)
+        button_layout.addWidget(self.delete_btn)
+        
         # Spacer
         button_layout.addStretch()
         
@@ -56,6 +61,28 @@ class CourseSelectionDialog(QtWidgets.QDialog):
                 self.course_list.setCurrentItem(item)
                 break
 
+    def delete_course(self):
+        """Delete the selected course"""
+        selected = self.course_list.currentItem()
+        if not selected:
+            QtWidgets.QMessageBox.warning(self, "Warning", "Please select a course to delete.")
+            return
+            
+        course_id = selected.data(Qt.UserRole)
+        course_title = selected.text()
+        
+        # Confirm deletion
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Confirm Delete",
+            f"Are you sure you want to delete '{course_title}'?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.Yes:
+            self.db.delete_course(course_id)
+            self.load_courses()
+
     def load_courses(self):
         self.course_list.clear()
         courses = self.db.get_all_courses()
@@ -69,6 +96,3 @@ class CourseSelectionDialog(QtWidgets.QDialog):
         if selected:
             return selected.data(Qt.UserRole)
         return None
-            
-
-

@@ -174,7 +174,7 @@ class DbManager:
     def save_course(self, course_id, title, items):
         """Save course with new structure"""
         with sqlite3.connect(str(self.db_path)) as conn:
-            items_json = json.dumps(items)
+            items_json = json.dumps(items, sort_keys=True)  # Add sort_keys=True
             if course_id:
                 conn.execute("""
                     UPDATE courses SET 
@@ -207,17 +207,19 @@ class DbManager:
             }
                             
     def create_new_course(self, title=None):
-        """Create a new empty course and return its ID"""
-        if not title:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-            title = f"New Course {timestamp}"
+        """Create a new empty course with deduplicated title"""
+        base_title = "New Course" if not title else title
+        counter = 1
+        new_title = base_title
+        
+        while True:
+            # Check both title and content
+            if not any(c[1] == new_title for c in self.get_all_courses()):
+                break
+            new_title = f"{base_title} ({counter})"
+            counter += 1
             
-        with sqlite3.connect(str(self.db_path)) as conn:
-            cursor = conn.execute(
-                "INSERT INTO courses (title, items) VALUES (?, ?)",
-                (title, json.dumps([]))
-            )
-            return cursor.lastrowid
+        return self.save_course(None, new_title, [])
 
     def delete_course(self, course_id):
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -335,4 +337,9 @@ class DbManager:
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute("DELETE FROM bookmarks WHERE surah=? AND ayah=?", (surah, ayah))
 
-
+    def items_exist(self, items):
+        """Check if course items already exist in any course (regardless of title)"""
+        items_json = json.dumps(items, sort_keys=True, ensure_ascii=False)
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM courses WHERE items = ?", (items_json,))
+            return cursor.fetchone()[0] > 0

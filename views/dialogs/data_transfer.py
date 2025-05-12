@@ -12,6 +12,7 @@ class DataTransferDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
+        self.db = self.parent.db
         self.operation_in_progress = False
         self.app_settings = AppSettings() 
         self.init_ui()
@@ -197,15 +198,37 @@ class DataTransferDialog(QtWidgets.QDialog):
                     self.update_progress("Importing courses...")
                     courses = json.loads(zipf.read('courses.json').decode('utf-8'))
                     for course in courses:
-                        title = course[1]
-                        items = course[2]  
-
-                        if not self.db.course_exists(title, items):
-                            self.db.save_course(None, title, items)
-                            self.update_progress(f"Added new course: {title}")
-                        else:
-                            self.update_progress(f"Skipped duplicate course: {title}")
-
+                        if not isinstance(course, list) or len(course) != 3:
+                            self.update_progress("Invalid course format - skipping")
+                            continue
+                        course_id, title, items = course
+                        # Validate items structure
+                        if not isinstance(items, list):
+                            self.update_progress(f"Invalid items format in course '{title}' - skipping")
+                            continue
+                        
+                        # Normalize items JSON
+                        try:
+                            normalized_items = json.loads(json.dumps(items, sort_keys=True))
+                        except Exception as e:
+                            self.update_progress(f"Invalid course format: {str(e)}")
+                            continue
+                            
+                        if self.db.items_exist(normalized_items):
+                            self.update_progress(f"Skipped duplicate content course: '{title}'")
+                            continue
+                            
+                        # Check for title conflicts
+                        existing_titles = [c[1] for c in self.db.get_all_courses()]
+                        new_title = title
+                        counter = 1
+                        while new_title in existing_titles:
+                            new_title = f"{title} ({counter})"
+                            counter += 1
+                            
+                        # Save with deduplicated title
+                        self.db.save_course(None, new_title, normalized_items)
+                        self.update_progress(f"Added new course: '{new_title}'")
 
                 # Import notes
                 if data_type in ['notes', 'all'] and 'notes.json' in zipf.namelist():
