@@ -548,6 +548,9 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.mark_unsaved()
 
     def add_note(self):
+        current_index = self.list_view.currentIndex()
+        current_row = current_index.row() if current_index.isValid() else -1
+
         new_note = {
             'type': 'note',
             'user_data': {
@@ -558,11 +561,16 @@ class CourseManagerDialog(QtWidgets.QDialog):
         }
         item = QtGui.QStandardItem("New Note")
         item.setData(new_note, QtCore.Qt.UserRole)
-        item.setEditable(False)  # Let delegate handle editing
-        self.model.appendRow(item)
-        
-        # Select and scroll to new item
-        index = self.model.index(self.model.rowCount()-1, 0)
+        item.setEditable(False)
+
+        if current_row == -1:  # No selection, append to end
+            self.model.appendRow(item)
+            new_row = self.model.rowCount() - 1
+        else:  # Insert below selection
+            new_row = current_row + 1
+            self.model.insertRow(new_row, item)
+
+        index = self.model.index(new_row, 0)
         self.list_view.setCurrentIndex(index)
         self.list_view.scrollTo(index)
         self.mark_unsaved()
@@ -826,10 +834,10 @@ class CourseManagerDialog(QtWidgets.QDialog):
             # Handle item movement
             if event.modifiers() & QtCore.Qt.ControlModifier:
                 if event.key() == QtCore.Qt.Key_Up:
-                    self.move_item_up()
+                    self.move_item(-1)
                     return True
                 if event.key() == QtCore.Qt.Key_Down:
-                    self.move_item_down()
+                    self.move_item(1)
                     return True
                     
         return super().eventFilter(source, event)
