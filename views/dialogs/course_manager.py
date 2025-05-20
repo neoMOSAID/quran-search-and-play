@@ -471,6 +471,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.preview_edit.textChanged.connect(self.handle_text_edit)
         self.preview_check.toggled.connect(self.on_preview_toggled)
         self.title_edit.textChanged.connect(self.handle_title_changed)
+        self.preview_edit.installEventFilter(self)
 
         self.setLayout(layout)
 
@@ -514,31 +515,46 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 self.load_course(course_id)
 
     def load_course(self, course_id):
-        """Load a course by ID with proper item deserialization"""
+        """Load a course by ID with proper unsaved state handling"""
         if not course_id:
             return
-        self.current_course = self.db.get_course(course_id)
-        self.title_edit.setText(self.current_course['title'])
-        self.model.clear()
-        self.unsaved_changes = False
-        if self.current_course:
-            self.original_title = self.current_course['title']
-        self.update_window_title()
         
-        for item in self.current_course['items']:
-            # Handle legacy string format if needed
-            if isinstance(item, str):
-                try:
-                    item = json.loads(item)
-                except json.JSONDecodeError:
-                    continue
-                    
-            list_item = QtGui.QStandardItem(item.get('text', ''))
-            list_item.setData(item, QtCore.Qt.UserRole)
-            self.model.appendRow(list_item)
+        # Store previous title to compare later
+        previous_title = self.title_edit.text()
+        
+        # Fetch course data
+        self.current_course = self.db.get_course(course_id)
+        if not self.current_course:
+            return
+        
+        try:
+            # Block signals while loading
+            self.title_edit.blockSignals(True)
+            self.model.blockSignals(True)
+            
+            # Set title first without triggering changes
+            new_title = self.current_course['title']
+            self.original_title = new_title
+            self.title_edit.setText(new_title)
+            
+            # Clear and reload items
+            self.model.clear()
+            for item in self.current_course['items']:
+                list_item = QtGui.QStandardItem(item.get('text', ''))
+                list_item.setData(item, QtCore.Qt.UserRole)
+                self.model.appendRow(list_item)
+                
+            # Reset state after load
+            self.unsaved_changes = False
+            self.update_window_title()
+            
+        finally:
+            # Restore signal handling
+            self.title_edit.blockSignals(False)
+            self.model.blockSignals(False)
         
         self.update_navigation_buttons()
-        self.list_view.setFocus()    
+        self.list_view.setFocus()   
 
     def _add_item_to_model(self, item):
         list_item = QtGui.QStandardItem()
@@ -630,9 +646,13 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.update_window_title()
 
     def load_previous_course(self):
+  
         if not self.current_course:
             return
-            
+
+        if not self.check_unsaved_changes():
+            return
+
         prev_info = self.db.get_previous_course(self.current_course['id'])
         if prev_info:
             prev_id, _ = prev_info
@@ -642,7 +662,10 @@ class CourseManagerDialog(QtWidgets.QDialog):
     def load_next_course(self):
         if not self.current_course:
             return
-            
+
+        if not self.check_unsaved_changes():
+            return  
+
         next_info = self.db.get_next_course(self.current_course['id'])
         if next_info:
             next_id, _ = next_info
@@ -664,7 +687,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
         """Handle preview checkbox changes"""
         if checked:
             self.preview_edit.show()
-            self.resize(800, 600) 
+            #self.resize(800, 600) 
         else:
             # Only hide if not showing a note
             current_index = self.list_view.currentIndex()
@@ -673,11 +696,14 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 data = item.data(QtCore.Qt.UserRole)
                 if data.get('type') != 'note':
                     self.preview_edit.hide()
-                    self.resize(250, 350) 
+                    #self.resize(250, 350) 
 
     def handle_title_changed(self, text):
+        """Only mark changes if different from original title"""
         if text != self.original_title:
-            self.unsaved_changes = True
+            self.mark_unsaved()
+        else:
+            self.unsaved_changes = False
             self.update_window_title()
 
     def update_window_title(self):
@@ -792,6 +818,30 @@ class CourseManagerDialog(QtWidgets.QDialog):
             # Update display text
             preview = new_content.split('\n')[0][:30] + ('...' if len(new_content) > 30 else '')
             item.setText(f"Note: {preview}")
+            self.mark_unsaved() 
+
+
+    def check_unsaved_changes(self):
+        """Check if there are unsaved changes and prompt user"""
+        if self.unsaved_changes:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                'Unsaved Changes',
+                'Save changes before switching courses?',
+                QtWidgets.QMessageBox.Save | 
+                QtWidgets.QMessageBox.Discard |
+                QtWidgets.QMessageBox.Cancel
+            )
+            if reply == QtWidgets.QMessageBox.Save:
+                self.save_course()
+                return True
+            elif reply == QtWidgets.QMessageBox.Discard:
+                self.unsaved_changes = False
+                self.update_window_title()
+                return True
+            else:
+                return False
+        return True
 
     def show_search_results(self, query):
         """Show actual search results in preview"""
@@ -808,12 +858,23 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.preview_edit.setPlainText("\n".join(output))
 
     def eventFilter(self, source, event):
+        # Existing code for Ctrl+S in preview_edit
+        if event.type() == QtCore.QEvent.KeyPress and source is self.preview_edit:
+            if event.key() == QtCore.Qt.Key_S and (event.modifiers() & QtCore.Qt.ControlModifier):
+                self.save_course()
+                if self.main_window:
+                    self.main_window.showMessage("Course saved", 2000)
+                return True  # Event handled
+                    
         if event.type() == QtCore.QEvent.KeyPress:
-            # Handle Enter key
+            # Handle Enter key only in list view
             if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
-                self.handle_enter_key()
-                return True
-                
+                if source is self.list_view:  # Only handle Enter for list view
+                    self.handle_enter_key()
+                    return True
+                else:
+                    return False  # Let other widgets handle Enter normally
+
             # Handle F2 editing
             if event.key() == QtCore.Qt.Key_F2:
                 self.start_editing()
@@ -822,15 +883,19 @@ class CourseManagerDialog(QtWidgets.QDialog):
             if event.key() == QtCore.Qt.Key_Delete:
                 self.remove_item()
                 return True
-                
+                    
             # Handle navigation
-            if event.key() == QtCore.Qt.Key_Left:
+            if event.key() == QtCore.Qt.Key_Left and source is not self.preview_edit:
+                if not self.check_unsaved_changes():
+                    return True  # Block navigation if user cancels
                 self.load_previous_course()
                 return True
-            if event.key() == QtCore.Qt.Key_Right:
+            if event.key() == QtCore.Qt.Key_Right and source is not self.preview_edit:
+                if not self.check_unsaved_changes():
+                    return True  # Block navigation if user cancels
                 self.load_next_course()
                 return True
-                
+                    
             # Handle item movement
             if event.modifiers() & QtCore.Qt.ControlModifier:
                 if event.key() == QtCore.Qt.Key_Up:
@@ -839,7 +904,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 if event.key() == QtCore.Qt.Key_Down:
                     self.move_item(1)
                     return True
-                    
+                        
         return super().eventFilter(source, event)
 
     def print_course(self):
@@ -860,7 +925,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
         title = self.title_edit.text()
         search_engine = self.parent().search_engine
         output.extend(["",])
-        output.extend(["========================================================================",])
+        #output.extend(["========================================================================",])
         output.extend([f"درس: {title}",])
         output.extend(["========================================================================", ""])
 
@@ -877,8 +942,9 @@ class CourseManagerDialog(QtWidgets.QDialog):
                     output.append(f"● {lines[0].strip()}")
                     # Add indented subsequent lines
                     for line in lines[1:]:
-                        if line.strip():  # Skip empty lines
-                            output.append(f"  {line.strip()}")
+                        #if line.strip():  # Skip empty lines
+                        output.append(f"  {line.strip()}")
+
             elif item_type == 'ayah':
                 surah = item.get('surah')
                 start = item.get('start')
@@ -917,7 +983,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
             f"{last_dir}/{title}.txt",
             "Text Files (*.txt)"
         )
-
+        output = [line.replace('(', ' ( ').replace(')', ' ) ') for line in output]
         if file_path:
             try:
                 with open(file_path, 'w', encoding='utf-8') as f:
