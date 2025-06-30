@@ -241,6 +241,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.search_engine = search_engine
         self.app_settings = AppSettings() 
         self.current_course = None
+        self.loading = False
         self.preview_was_visible = False
         self.unsaved_changes = False
         self.original_title = ""
@@ -256,7 +257,9 @@ class CourseManagerDialog(QtWidgets.QDialog):
 
 
     def handle_model_changed(self):
-        self.mark_unsaved()
+        """Only mark changes if not loading"""
+        if not self.loading and not self.unsaved_changes:
+            self.mark_unsaved()
 
     def handle_theme_change(self, dark):
         # Refresh list view styling
@@ -515,46 +518,85 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 self.load_course(course_id)
 
     def load_course(self, course_id):
-        """Load a course by ID with proper unsaved state handling"""
         if not course_id:
             return
         
-        # Store previous title to compare later
-        previous_title = self.title_edit.text()
-        
-        # Fetch course data
+        self.loading = True  # Set loading flag
         self.current_course = self.db.get_course(course_id)
         if not self.current_course:
+            self.loading = False
             return
         
         try:
-            # Block signals while loading
-            self.title_edit.blockSignals(True)
-            self.model.blockSignals(True)
+            # REMOVE signal blocking
+            # self.title_edit.blockSignals(True)  # REMOVE
+            # self.model.blockSignals(True)  # REMOVE
             
-            # Set title first without triggering changes
             new_title = self.current_course['title']
             self.original_title = new_title
             self.title_edit.setText(new_title)
             
-            # Clear and reload items
             self.model.clear()
             for item in self.current_course['items']:
                 list_item = QtGui.QStandardItem(item.get('text', ''))
                 list_item.setData(item, QtCore.Qt.UserRole)
                 self.model.appendRow(list_item)
                 
-            # Reset state after load
+            # Force UI update
+            self.list_view.viewport().update()
+            QtCore.QCoreApplication.processEvents()  # Process pending events
+            
             self.unsaved_changes = False
             self.update_window_title()
             
         finally:
-            # Restore signal handling
-            self.title_edit.blockSignals(False)
-            self.model.blockSignals(False)
+            # REMOVE signal unblocking
+            # self.title_edit.blockSignals(False)  # REMOVE
+            # self.model.blockSignals(False)  # REMOVE
+            self.loading = False  # Clear loading flag
+
+
+    # def load_course(self, course_id):
+    #     """Load a course by ID with proper unsaved state handling"""
+    #     if not course_id:
+    #         return
         
-        self.update_navigation_buttons()
-        self.list_view.setFocus()   
+    #     # Store previous title to compare later
+    #     previous_title = self.title_edit.text()
+        
+    #     # Fetch course data
+    #     self.current_course = self.db.get_course(course_id)
+    #     if not self.current_course:
+    #         return
+        
+    #     try:
+    #         # Block signals while loading
+    #         self.title_edit.blockSignals(True)
+    #         self.model.blockSignals(True)
+            
+    #         # Set title first without triggering changes
+    #         new_title = self.current_course['title']
+    #         self.original_title = new_title
+    #         self.title_edit.setText(new_title)
+            
+    #         # Clear and reload items
+    #         self.model.clear()
+    #         for item in self.current_course['items']:
+    #             list_item = QtGui.QStandardItem(item.get('text', ''))
+    #             list_item.setData(item, QtCore.Qt.UserRole)
+    #             self.model.appendRow(list_item)
+                
+    #         # Reset state after load
+    #         self.unsaved_changes = False
+    #         self.update_window_title()
+            
+    #     finally:
+    #         # Restore signal handling
+    #         self.title_edit.blockSignals(False)
+    #         self.model.blockSignals(False)
+        
+    #     self.update_navigation_buttons()
+    #     self.list_view.setFocus()   
 
     def _add_item_to_model(self, item):
         list_item = QtGui.QStandardItem()
@@ -699,12 +741,9 @@ class CourseManagerDialog(QtWidgets.QDialog):
                     #self.resize(250, 350) 
 
     def handle_title_changed(self, text):
-        """Only mark changes if different from original title"""
-        if text != self.original_title:
+        """Only mark changes if not loading"""
+        if not self.loading and text != self.original_title:
             self.mark_unsaved()
-        else:
-            self.unsaved_changes = False
-            self.update_window_title()
 
     def update_window_title(self):
         title = "Course Manager"
