@@ -1,5 +1,8 @@
 
 import json
+import os
+import glob
+from datetime import datetime
 
 from PyQt5 import QtCore, QtWidgets, QtGui
 from utils.settings import AppSettings
@@ -245,16 +248,202 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.preview_was_visible = False
         self.unsaved_changes = False
         self.original_title = ""
-        self.init_ui()
-        self.load_initial_courses() 
-        self.list_view.setFocus() 
-
+        self.auto_save_timer = QtCore.QTimer()
+        self.auto_save_timer.timeout.connect(self.auto_save_note)
+        self.recovery_dir = "note_recovery"
+        os.makedirs(self.recovery_dir, exist_ok=True)
+        self.edit_mode = False
+        
         # Add model change listeners
+        self.model = QtGui.QStandardItemModel()
         self.model.dataChanged.connect(self.handle_model_changed)
         self.model.rowsInserted.connect(self.handle_model_changed)
         self.model.rowsRemoved.connect(self.handle_model_changed)
-        self.main_window.theme_action.toggled.connect(self.handle_theme_change)
+        
+        if self.main_window and hasattr(self.main_window, 'theme_action'):
+            self.main_window.theme_action.toggled.connect(self.handle_theme_change)
+        
+        self.init_ui()
+        self.load_initial_courses() 
+        self.list_view.setFocus()
 
+    def auto_save_note(self):
+        """Auto-save note content to dedicated recovery file"""
+        if not hasattr(self, 'current_editing_index') or not self.current_editing_index:
+            return
+            
+        if not hasattr(self, 'current_recovery_file'):
+            # Generate unique filename based on note ID and timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            note_id = hash(self.current_editing_index)  # Simple ID based on index
+            self.current_recovery_file = os.path.join(
+                self.recovery_dir, 
+                f"note_recovery_{note_id}_{timestamp}.txt"
+            )
+        
+        content = self.preview_edit.toPlainText()
+        try:
+            with open(self.current_recovery_file, "w", encoding="utf-8") as f:
+                f.write(f"# Auto-saved at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(content)
+            
+            # Show status message with full path
+            self.status_bar.showMessage(
+                f"Auto-saved to: {os.path.abspath(self.current_recovery_file)}", 
+                30000
+            )
+        except Exception as e:
+            logging.error(f"Error saving recovery file: {str(e)}")
+            self.status_bar.showMessage(
+                f"Error saving recovery: {str(e)}", 
+                50000
+            )
+
+    # def log_edit_session(self):
+    #     """Log edit session start to recovery file"""
+    #     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    #     try:
+    #         with open(self.recovery_file, "w", encoding="utf-8") as f:
+    #             f.write(f"# Edit session started at {timestamp}\n")
+    #             f.write(self.original_note_content)
+    #     except Exception as e:
+    #         logging.error(f"Error creating recovery file: {str(e)}")
+
+    def clear_recovery_file(self):
+        """Clear the recovery file"""
+        try:
+            if os.path.exists(self.recovery_file):
+                os.remove(self.recovery_file)
+        except Exception as e:
+            logging.error(f"Error removing recovery file: {str(e)}")
+
+    # def save_current_note(self):
+    #     """Save current note and exit edit mode"""
+    #     if not self.current_editing_index.isValid():
+    #         return
+            
+    #     item = self.model.itemFromIndex(self.current_editing_index)
+    #     data = item.data(QtCore.Qt.UserRole)
+    #     new_content = self.preview_edit.toPlainText()
+        
+    #     # Update data
+    #     data['user_data']['content'] = new_content
+    #     item.setData(data, QtCore.Qt.UserRole)
+        
+    #     # Update display
+    #     preview = new_content.split('\n')[0][:30] + ('...' if len(new_content) > 30 else '')
+    #     item.setText(f"Note: {preview}")
+        
+    #     # Exit edit mode
+    #     self.end_editing()
+        
+    #     # Clear recovery file
+    #     self.clear_recovery_file()
+
+
+    def cancel_editing(self):
+        """Cancel editing and revert to original content"""
+        if not hasattr(self, 'current_editing_index') or not self.current_editing_index:
+            return
+            
+        item = self.model.itemFromIndex(self.current_editing_index)
+        data = item.data(QtCore.Qt.UserRole)
+        
+        # Revert to original content
+        data['user_data']['content'] = self.original_note_content
+        item.setData(data, QtCore.Qt.UserRole)
+        self.preview_edit.setPlainText(self.original_note_content)
+        
+        # Update display text
+        preview = self.original_note_content.split('\n')[0][:30] + ('...' if len(self.original_note_content) > 30 else '')
+        item.setText(f"Note: {preview}")
+        
+        # Exit edit mode
+        self.end_editing()
+        
+        # Show status message
+        self.status_bar.showMessage("Editing canceled", 30000)
+        # Clear recovery file
+        #self.clear_recovery_file()
+
+    def end_editing(self):
+        """Exit edit mode"""
+        self.preview_edit.setReadOnly(True)
+        self.set_edit_mode(False)
+        self.auto_save_timer.stop()
+        if hasattr(self, 'current_editing_index'):
+            self.current_editing_index = None
+        self.list_view.setFocus()
+
+    # def revert_to_version(self):
+    #     """Revert to previous version"""
+    #     if not self.edit_mode or len(self.note_versions) < 2:
+    #         return
+            
+    #     # Get the previous version
+    #     prev_version = self.note_versions[self.current_version - 1]
+        
+    #     # Update the editor and model
+    #     self.preview_edit.setPlainText(prev_version)
+    #     self.status_bar.showMessage(f"Reverted to previous version", 3000)
+        
+    #     # Update the current version pointer
+    #     self.current_version -= 1
+    #     if self.current_version < 0:
+    #         self.current_version = 0
+            
+    #     # Update the model
+    #     item = self.model.itemFromIndex(self.current_editing_index)
+    #     data = item.data(QtCore.Qt.UserRole)
+    #     data['user_data']['content'] = prev_version
+    #     item.setData(data, QtCore.Qt.UserRole)
+        
+    #     # Update display text
+    #     preview = prev_version.split('\n')[0][:30] + ('...' if len(prev_version) > 30 else '')
+    #     item.setText(f"Note: {preview}")
+    #     self.mark_unsaved()
+
+    # def show_version_history(self):
+    #     """Show dialog with all saved versions"""
+    #     if not self.edit_mode or len(self.note_versions) < 2:
+    #         return
+            
+    #     dialog = QtWidgets.QDialog(self)
+    #     dialog.setWindowTitle("Note Version History")
+    #     layout = QtWidgets.QVBoxLayout()
+        
+    #     list_widget = QtWidgets.QListWidget()
+    #     for i, version in enumerate(reversed(self.note_versions)):
+    #         preview = version.split('\n')[0][:50] + ('...' if len(version) > 50 else '')
+    #         item = QtWidgets.QListWidgetItem(f"Version {len(self.note_versions)-i}: {preview}")
+    #         item.setData(QtCore.Qt.UserRole, version)
+    #         list_widget.addItem(item)
+        
+    #     button_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+    #     button_box.accepted.connect(dialog.accept)
+    #     button_box.rejected.connect(dialog.reject)
+        
+    #     layout.addWidget(QtWidgets.QLabel("Select a version to restore:"))
+    #     layout.addWidget(list_widget)
+    #     layout.addWidget(button_box)
+    #     dialog.setLayout(layout)
+        
+    #     if dialog.exec_() == QtWidgets.QDialog.Accepted:
+    #         selected = list_widget.currentItem()
+    #         if selected:
+    #             version_content = selected.data(QtCore.Qt.UserRole)
+    #             self.preview_edit.setPlainText(version_content)
+                
+    #             # Update model
+    #             item = self.model.itemFromIndex(self.current_editing_index)
+    #             data = item.data(QtCore.Qt.UserRole)
+    #             data['user_data']['content'] = version_content
+    #             item.setData(data, QtCore.Qt.UserRole)
+                
+    #             # Update display text
+    #             preview = version_content.split('\n')[0][:30] + ('...' if len(version_content) > 30 else '')
+    #             item.setText(f"Note: {preview}")
+    #             self.mark_unsaved()
 
     def handle_model_changed(self):
         """Only mark changes if not loading"""
@@ -280,7 +469,6 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.prev_btn.clicked.connect(self.load_previous_course)
         self.next_btn.clicked.connect(self.load_next_course)
         
-        # 
         nav_layout = QtWidgets.QHBoxLayout()
         nav_layout.addWidget(self.prev_btn)
         nav_layout.addWidget(self.title_edit)
@@ -289,14 +477,10 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.prev_btn.setFixedSize(25, 25)
         self.next_btn.setFixedSize(25, 25)
 
-        # nav_layout.setStretch(0, 1)
-        # nav_layout.setStretch(1, 8)
-        # nav_layout.setStretch(2, 1)
         layout.addLayout(nav_layout)
 
         # List View
         self.list_view = QtWidgets.QListView()
-        self.model = QtGui.QStandardItemModel()
         self.list_view.setModel(self.model)
         self.delegate = CourseItemDelegate(parent=self)
         self.list_view.setItemDelegate(self.delegate)
@@ -306,14 +490,6 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.list_view.setAcceptDrops(True)
         self.list_view.setDropIndicatorShown(True)
         self.list_view.setLayoutDirection(QtCore.Qt.RightToLeft)
-        # self.list_view.setStyleSheet("""
-        #     QListView {
-        #         font-family: 'Amiri';
-        #         font-size: 14pt;
-        #         padding-right: 10px;
-        #         text-align: right;
-        #     }
-        # """)
 
         self.list_view.setStyleSheet("""
             QListView {
@@ -355,7 +531,6 @@ class CourseManagerDialog(QtWidgets.QDialog):
 
         self.preview_edit = QtWidgets.QTextEdit()
         self.preview_edit.setReadOnly(True)
-
         self.preview_edit.setStyleSheet("""
             QTextEdit {
                 font-family: 'Amiri';
@@ -364,35 +539,16 @@ class CourseManagerDialog(QtWidgets.QDialog):
             }
         """)
 
-        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        self.splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        self.splitter.addWidget(self.list_view)
+        self.splitter.addWidget(self.preview_edit)
+        self.splitter.setSizes([int(self.width()*0.3), int(self.width()*0.7)])
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 3)
 
-        splitter.addWidget(self.list_view)
-        splitter.addWidget(self.preview_edit)
-        splitter.setSizes([int(self.width()*0.3), int(self.width()*0.7)])
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 3)
-
-        self.list_view.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding,
-            QtWidgets.QSizePolicy.Expanding
-        )
-
-        layout.addWidget(splitter)
+        layout.addWidget(self.splitter)
 
         # Control Buttons
-        self.add_note_btn = QtWidgets.QPushButton("Add Note")
-        self.add_note_btn.clicked.connect(self.add_note)
-        self.remove_btn = QtWidgets.QPushButton("Remove")
-        self.remove_btn.clicked.connect(self.remove_item)
-        self.move_up_btn = QtWidgets.QPushButton("Move Up")
-        self.move_up_btn.clicked.connect(lambda: self.move_item(-1))
-        self.move_down_btn = QtWidgets.QPushButton("Move Down")
-        self.move_down_btn.clicked.connect(lambda: self.move_item(1))
-        self.play_checkbox = QtWidgets.QCheckBox("Auto-Play")
-        self.play_checkbox.setChecked(False)
-        self.preview_check = QtWidgets.QCheckBox("Preview")
-        self.preview_check.setChecked(False)
-
         button_container = QtWidgets.QWidget()
         btn_layout = FlowLayout(button_container, margin=2, spacing=4)  
 
@@ -409,13 +565,42 @@ class CourseManagerDialog(QtWidgets.QDialog):
             }
         """)
 
+        # Existing buttons
+        self.add_note_btn = QtWidgets.QPushButton("Add Note")
+        self.add_note_btn.clicked.connect(self.add_note)
+        self.remove_btn = QtWidgets.QPushButton("Remove")
+        self.remove_btn.clicked.connect(self.remove_item)
+        self.move_up_btn = QtWidgets.QPushButton("Move Up")
+        self.move_up_btn.clicked.connect(lambda: self.move_item(-1))
+        self.move_down_btn = QtWidgets.QPushButton("Move Down")
+        self.move_down_btn.clicked.connect(lambda: self.move_item(1))
+        self.play_checkbox = QtWidgets.QCheckBox("Auto-Play")
+        self.play_checkbox.setChecked(False)
+        self.preview_check = QtWidgets.QCheckBox("Preview")
+        self.preview_check.setChecked(False)
+
+        # Note editing buttons
+        self.edit_note_btn = QtWidgets.QPushButton("Edit Note")
+        self.edit_note_btn.clicked.connect(self.start_editing)
+        self.save_note_btn = QtWidgets.QPushButton("Save Note")
+        self.save_note_btn.clicked.connect(self.save_note)
+        self.cancel_note_btn = QtWidgets.QPushButton("Cancel")
+        self.cancel_note_btn.clicked.connect(self.cancel_editing)
+        
+        # Add all buttons to layout
         btn_layout.addWidget(self.add_note_btn)
         btn_layout.addWidget(self.remove_btn)
         btn_layout.addWidget(self.move_up_btn)
         btn_layout.addWidget(self.move_down_btn)
+        btn_layout.addWidget(self.edit_note_btn)
         btn_layout.addWidget(self.play_checkbox)
         btn_layout.addWidget(self.preview_check)
-        
+        btn_layout.addWidget(self.save_note_btn)
+        btn_layout.addWidget(self.cancel_note_btn)
+
+        # Initially hide save/cancel buttons
+        self.save_note_btn.hide()
+        self.cancel_note_btn.hide()
 
         button_container.setMaximumHeight(60) 
         button_container.setSizePolicy(
@@ -426,20 +611,11 @@ class CourseManagerDialog(QtWidgets.QDialog):
         layout.addWidget(button_container)
 
         # Dialog Buttons
-        dialog_btn = QtWidgets.QDialogButtonBox(
+        self.dialog_btn = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Close)
 
-        self.print_btn = QtWidgets.QPushButton("Print")
-        self.print_btn.clicked.connect(self.print_course)
-
-        self.open_btn = QtWidgets.QPushButton("Open")  # New button
-        self.open_btn.clicked.connect(self.open_course_selection)  # Connect handler
-
-        dialog_btn.addButton(self.open_btn, QtWidgets.QDialogButtonBox.ActionRole)
-        dialog_btn.addButton(self.print_btn, QtWidgets.QDialogButtonBox.ActionRole)
-
         # Compact styling
-        dialog_btn.setStyleSheet("""
+        self.dialog_btn.setStyleSheet("""
             QPushButton {
                 min-width: 70px;
                 max-width: 90px;
@@ -451,23 +627,37 @@ class CourseManagerDialog(QtWidgets.QDialog):
             }
         """)
 
-        dialog_btn.setCenterButtons(True)
-        dialog_btn.accepted.connect(self.save_course)
-        dialog_btn.rejected.connect(self.reject)
 
-        # Create container for centering
+        self.print_btn = QtWidgets.QPushButton("Print")
+        self.print_btn.clicked.connect(self.print_course)
+
+        self.open_btn = QtWidgets.QPushButton("Open")
+        self.open_btn.clicked.connect(self.open_course_selection)
+
+        self.dialog_btn.addButton(self.open_btn, QtWidgets.QDialogButtonBox.ActionRole)
+        self.dialog_btn.addButton(self.print_btn, QtWidgets.QDialogButtonBox.ActionRole)
+
+        # Button styling (unchanged)
+        self.dialog_btn.accepted.connect(self.save_course)
+        self.dialog_btn.rejected.connect(self.reject)
+
         # Create compact container
         btn_container = QtWidgets.QWidget()
         btn_container.setFixedHeight(32)  # Set fixed height
         btn_container_layout = QtWidgets.QHBoxLayout(btn_container)
         btn_container_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
         btn_container_layout.setSpacing(4)
-        btn_container_layout.addWidget(dialog_btn)
+        btn_container_layout.addWidget(self.dialog_btn)
         btn_container_layout.setAlignment(QtCore.Qt.AlignCenter)
 
         layout.addWidget(btn_container) 
 
-        # connections
+        self.status_bar = QtWidgets.QStatusBar()
+        self.status_bar.setSizeGripEnabled(False)
+        self.status_bar.setMaximumHeight(20) 
+        layout.addWidget(self.status_bar)
+
+        # Connections
         self.list_view.installEventFilter(self)
         self.list_view.doubleClicked.connect(self.handle_enter_key)
         self.list_view.selectionModel().currentChanged.connect(self.handle_selection_changed)
@@ -478,10 +668,47 @@ class CourseManagerDialog(QtWidgets.QDialog):
 
         self.setLayout(layout)
 
-    def showEvent(self, event):
-        """Refresh view when dialog is shown to catch theme changes"""
-        self.list_view.viewport().update()
-        super().showEvent(event)
+
+    # def showEvent(self, event):
+    #     """Check for recovery file on show"""
+    #     super().showEvent(event)
+    #     self.check_recovery_file()
+
+    # def check_recovery_file(self):
+    #     """Check for recovery file and prompt user"""
+    #     if os.path.exists(self.recovery_file):
+    #         reply = QtWidgets.QMessageBox.question(
+    #             self,
+    #             'Recover Note',
+    #             'A recovered note edit session was found. Would you like to recover it?',
+    #             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+    #         )
+            
+    #         if reply == QtWidgets.QMessageBox.Yes:
+    #             try:
+    #                 with open(self.recovery_file, "r", encoding="utf-8") as f:
+    #                     content = f.read()
+    #                     # Skip header line
+    #                     if content.startswith("#"):
+    #                         content = "\n".join(content.split("\n")[1:])
+    #                     self.recovered_content = content
+                        
+    #                     # Find the first note item
+    #                     for row in range(self.model.rowCount()):
+    #                         index = self.model.index(row, 0)
+    #                         item = self.model.itemFromIndex(index)
+    #                         data = item.data(QtCore.Qt.UserRole)
+    #                         if data.get('type') == 'note':
+    #                             self.list_view.setCurrentIndex(index)
+    #                             self.start_editing()
+    #                             self.preview_edit.setPlainText(content)
+    #                             break
+    #             except Exception as e:
+    #                 logging.error(f"Error loading recovery file: {str(e)}")
+            
+    #         # Clear recovery file regardless of choice
+    #         #self.clear_recovery_file()
+
 
     def load_initial_courses(self):
         """Load first course or create new one"""
@@ -518,6 +745,23 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 self.load_course(course_id)
 
     def load_course(self, course_id):
+
+        """Confirm before loading new course during editing"""
+        if self.edit_mode:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                'Unsaved Note',
+                'You have unsaved changes to a note. Save before switching courses?',
+                QtWidgets.QMessageBox.Save | 
+                QtWidgets.QMessageBox.Discard |
+                QtWidgets.QMessageBox.Cancel
+            )
+            
+            if reply == QtWidgets.QMessageBox.Cancel:
+                return
+            elif reply == QtWidgets.QMessageBox.Save:
+                self.end_editing(save=True)
+
         if not course_id:
             return
         
@@ -785,10 +1029,19 @@ class CourseManagerDialog(QtWidgets.QDialog):
                         self.parent().search_method_combo.setCurrentIndex(idx)
                     self.search_requested.emit(data['query'])
                 
-                elif data['type'] == 'note':
+                elif data.get('type') == 'note' and not self.edit_mode:
+                    self.start_editing()
                     return
 
     def handle_selection_changed(self, current, previous):
+        if hasattr(self, 'current_editing_index') and self.current_editing_index:
+            # Block selection changes during editing
+            self.list_view.selectionModel().select(
+                self.current_editing_index, 
+                QtCore.QItemSelectionModel.ClearAndSelect
+            )
+            return
+
         item = self.model.itemFromIndex(current)
         if not item:
             return
@@ -809,9 +1062,11 @@ class CourseManagerDialog(QtWidgets.QDialog):
             if not self.preview_edit.isVisible():
                 self.preview_edit.show()
             self.preview_edit.setPlainText(content)
-            self.preview_edit.setReadOnly(False)
+            self.preview_edit.setReadOnly(True)
+            self.edit_note_btn.setEnabled(True)  # Enable edit button
             return
         else:
+            self.edit_note_btn.setEnabled(False)  # Disable edit button for non-notes
             if self.preview_check.isChecked():
                 self.preview_edit.show()
             else:
@@ -896,7 +1151,152 @@ class CourseManagerDialog(QtWidgets.QDialog):
         
         self.preview_edit.setPlainText("\n".join(output))
 
+    def start_editing(self):
+        """Enter note editing mode"""
+        index = self.list_view.currentIndex()
+        if not index.isValid():
+            return
+            
+        item = self.model.itemFromIndex(index)
+        data = item.data(QtCore.Qt.UserRole)
+        if data.get('type') != 'note':
+            return
+            
+        # Store original content
+        self.original_note_content = data['user_data']['content']
+        self.current_editing_index = index
+        
+        # Check for existing recovery files for this note
+        note_id = hash(index)  # Simple ID based on index
+        recovery_files = glob.glob(os.path.join(self.recovery_dir, f"*{note_id}*.txt"))
+        
+        if recovery_files:
+            # Sort by modification time (newest first)
+            recovery_files.sort(key=os.path.getmtime, reverse=True)
+            newest_file = recovery_files[0]
+            
+            self.status_bar.showMessage(
+                f"Found recovery file: {os.path.abspath(newest_file)}", 
+                50000
+            )
+            
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                'Recovery File Found',
+                f'A recovery file exists for this note:\n\n{os.path.abspath(newest_file)}\n\n'
+                'It will be overwritten with your changes. Continue editing?',
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+            )
+            
+            if reply == QtWidgets.QMessageBox.No:
+                return
+        
+        # Enable editing
+        self.preview_edit.setReadOnly(False)
+        self.preview_edit.setFocus()
+        
+        # Show status message
+        self.status_bar.showMessage(
+            f"Editing note - Auto-saves to: {self.recovery_dir}", 
+            50000
+        )
+        
+        # Disable all other controls
+        self.set_edit_mode(True)
+        
+        # Start auto-save timer
+        self.auto_save_timer.start(30000)  # Save every 30 seconds
+
+    def set_edit_mode(self, editing):
+        """Enable/disable UI elements during editing"""
+        # Disable all controls except the current editing ones
+        controls = [
+            self.add_note_btn, self.remove_btn, self.move_up_btn, self.move_down_btn,
+            self.play_checkbox, self.preview_check, self.title_edit, self.prev_btn, self.next_btn,
+            self.print_btn, self.open_btn, self.edit_note_btn, self.dialog_btn
+        ]
+        
+        for control in controls:
+            control.setEnabled(not editing)
+            
+        # self.list_view.setEnabled(not editing)
+        # self.splitter.setEnabled(not editing)
+        
+        # Show/hide editing buttons
+        self.edit_note_btn.setVisible(not editing)
+        self.save_note_btn.setVisible(editing)
+        self.cancel_note_btn.setVisible(editing)
+
+        self.edit_mode = editing
+
+    def save_note(self):
+        """Save current note and exit edit mode"""
+        if not hasattr(self, 'current_editing_index') or not self.current_editing_index:
+            return
+            
+        item = self.model.itemFromIndex(self.current_editing_index)
+        data = item.data(QtCore.Qt.UserRole)
+        new_content = self.preview_edit.toPlainText()
+        
+        # Update data
+        data['user_data']['content'] = new_content
+        item.setData(data, QtCore.Qt.UserRole)
+        
+        # Update display text
+        preview = new_content.split('\n')[0][:30] + ('...' if len(new_content) > 30 else '')
+        item.setText(f"Note: {preview}")
+        
+        # Exit edit mode
+        self.end_editing()
+        
+        # Show status message
+        self.status_bar.showMessage("Note saved", 30000)
+
+    def closeEvent(self, event):
+        """Handle window close event"""
+        # If in edit mode, prompt to save
+        if hasattr(self, 'current_editing_index') and self.current_editing_index:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                'Unsaved Note',
+                'You are currently editing a note. Save changes?',
+                QtWidgets.QMessageBox.Save | 
+                QtWidgets.QMessageBox.Discard |
+                QtWidgets.QMessageBox.Cancel
+            )
+            
+            if reply == QtWidgets.QMessageBox.Cancel:
+                event.ignore()
+                return
+            elif reply == QtWidgets.QMessageBox.Save:
+                self.save_note()
+            else:
+                self.cancel_editing()
+        
+        # Clear recovery file when closing
+        #self.clear_recovery_file()
+        event.accept()
+
     def eventFilter(self, source, event):
+
+        # Block all events during note editing
+        if hasattr(self, 'current_editing_index') and self.current_editing_index:
+            # Only allow events from the preview editor
+            if source is not self.preview_edit:
+                return True
+                
+            # Handle save with Ctrl+S
+            if event.type() == QtCore.QEvent.KeyPress:
+                if event.key() == QtCore.Qt.Key_S and (event.modifiers() & QtCore.Qt.ControlModifier):
+                    self.save_note()
+                    return True
+                # Allow escape to cancel
+                elif event.key() == QtCore.Qt.Key_Escape:
+                    #self.cancel_editing()
+                    return True
+                    
+            return super().eventFilter(source, event)
+
         # Existing code for Ctrl+S in preview_edit
         if event.type() == QtCore.QEvent.KeyPress and source is self.preview_edit:
             if event.key() == QtCore.Qt.Key_S and (event.modifiers() & QtCore.Qt.ControlModifier):
