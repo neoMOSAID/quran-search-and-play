@@ -445,8 +445,9 @@ class CourseManagerDialog(QtWidgets.QDialog):
     #             item.setText(f"Note: {preview}")
     #             self.mark_unsaved()
 
-    def handle_model_changed(self):
+    def handle_model_changed(self, *args):
         """Only mark changes if not loading"""
+        #print(f"Model changed signal received with args: {args}")
         if not self.loading and not self.unsaved_changes:
             self.mark_unsaved()
 
@@ -462,8 +463,26 @@ class CourseManagerDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout()
 
         # Header
-        self.title_edit = QtWidgets.QLineEdit()
-        self.title_edit.setPlaceholderText("Course Title")
+        # Replace title_edit with a combo box
+        self.course_combo = QtWidgets.QComboBox()
+        self.course_combo.setEditable(True)  # Allow editing the title
+        self.course_combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)  # Don't add new items on edit
+        self.course_combo.setMinimumWidth(200)  # Make it wider
+        
+        # Create a custom delegate to handle double-click
+        class ComboDelegate(QtWidgets.QStyledItemDelegate):
+            def __init__(self, parent):
+                super().__init__(parent)
+                
+            def editorEvent(self, event, model, option, index):
+                # Open dropdown on double-click
+                if event.type() == QtCore.QEvent.MouseButtonDblClick:
+                    self.parent().showPopup()
+                    return True
+                return super().editorEvent(event, model, option, index)
+        
+        self.course_combo.setItemDelegate(ComboDelegate(self.course_combo))
+
         self.prev_btn = QtWidgets.QPushButton("←")
         self.next_btn = QtWidgets.QPushButton("→")
         self.prev_btn.clicked.connect(self.load_previous_course)
@@ -471,7 +490,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
         
         nav_layout = QtWidgets.QHBoxLayout()
         nav_layout.addWidget(self.prev_btn)
-        nav_layout.addWidget(self.title_edit)
+        nav_layout.addWidget(self.course_combo)
         nav_layout.addWidget(self.next_btn)
 
         self.prev_btn.setFixedSize(25, 25)
@@ -663,8 +682,11 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.list_view.selectionModel().currentChanged.connect(self.handle_selection_changed)
         self.preview_edit.textChanged.connect(self.handle_text_edit)
         self.preview_check.toggled.connect(self.on_preview_toggled)
-        self.title_edit.textChanged.connect(self.handle_title_changed)
         self.preview_edit.installEventFilter(self)
+
+        self.course_combo.currentIndexChanged.connect(self.handle_course_selection)
+        self.course_combo.editTextChanged.connect(self.handle_title_changed)
+        self.course_combo.installEventFilter(self)
 
         self.setLayout(layout)
 
@@ -744,6 +766,43 @@ class CourseManagerDialog(QtWidgets.QDialog):
             if course_id:
                 self.load_course(course_id)
 
+    def handle_course_selection(self, index):
+        """Handle when a course is selected from the dropdown"""
+        if index < 0 or self.loading:
+            return
+            
+        course_id = self.course_combo.itemData(index)
+        if course_id and course_id != getattr(self.current_course, 'id', None):
+            # Check for unsaved changes before loading new course
+            if not self.check_unsaved_changes():
+                # User canceled, so reset to current course
+                if self.current_course:
+                    current_index = self.course_combo.findData(self.current_course['id'])
+                    if current_index >= 0:
+                        self.course_combo.setCurrentIndex(current_index)
+                return
+                
+            self.load_course(course_id)
+
+    def update_course_dropdown(self):
+        """Populate the dropdown with all courses"""
+        self.course_combo.blockSignals(True)
+        self.course_combo.clear()
+        
+        courses = self.db.get_all_courses()
+        for course in courses:
+            course_id = course[0]
+            title = course[1]
+            self.course_combo.addItem(title, course_id)
+            
+        # Set current course
+        if self.current_course:
+            index = self.course_combo.findData(self.current_course['id'])
+            if index >= 0:
+                self.course_combo.setCurrentIndex(index)
+                
+        self.course_combo.blockSignals(False)
+
     def load_course(self, course_id):
 
         """Confirm before loading new course during editing"""
@@ -771,34 +830,96 @@ class CourseManagerDialog(QtWidgets.QDialog):
             self.loading = False
             return
         
+        # print(f"Loading course ID: {course_id}")
+        # print(f"Previous unsaved state: {self.unsaved_changes}")
+        # print(f"Previous original title: {self.original_title}")
+
         try:
-            # REMOVE signal blocking
-            # self.title_edit.blockSignals(True)  # REMOVE
-            # self.model.blockSignals(True)  # REMOVE
-            
-            new_title = self.current_course['title']
-            self.original_title = new_title
-            self.title_edit.setText(new_title)
-            
+            self.unsaved_changes = False
+            self.original_title = self.current_course['title']
+            self.update_course_dropdown() 
+            # print(f"Setting title to: {new_title}")
+            # print(f"Model row count before clear: {self.model.rowCount()}")
+
+            # Block signals while loading
+            self.model.blockSignals(True)
+
             self.model.clear()
+            
+            # print(f"Model cleared, row count: {self.model.rowCount()}")
+
             for item in self.current_course['items']:
                 list_item = QtGui.QStandardItem(item.get('text', ''))
                 list_item.setData(item, QtCore.Qt.UserRole)
                 self.model.appendRow(list_item)
+                # print(f"Added item: {item.get('text', '')[:20]}...")
                 
             # Force UI update
             self.list_view.viewport().update()
             QtCore.QCoreApplication.processEvents()  # Process pending events
             
-            self.unsaved_changes = False
+            # print(f"Model row count after load: {self.model.rowCount()}")
+            # print(f"Current course item count: {len(self.current_course['items'])}")
+                        
             self.update_window_title()
-            
+ 
         finally:
             # REMOVE signal unblocking
             # self.title_edit.blockSignals(False)  # REMOVE
             # self.model.blockSignals(False)  # REMOVE
+            self.model.blockSignals(False)
             self.loading = False  # Clear loading flag
+            QtCore.QTimer.singleShot(100, self.clear_initial_changes)
 
+
+            # print(f"After load - unsaved_changes: {self.unsaved_changes}")
+            # print(f"Title edit text: {self.title_edit.text()}")
+            # print(f"Original title: {self.original_title}")
+            # print(f"Title changed: {self.title_edit.text() != self.original_title}")
+            # print(f"Model row count changed: {self.model.rowCount() != len(self.current_course['items'])}")
+            # print("-" * 50)
+
+    def clear_initial_changes(self):
+        """Clear any false unsaved states caused by initial rendering"""
+        if not self.loading and self.unsaved_changes:
+            #print("Clearing false unsaved state after load")
+            self.unsaved_changes = False
+            self.update_window_title()
+
+    def mark_unsaved(self):
+        if not self.loading and not self.unsaved_changes:
+            # Check if this is a real content change or just view update
+            if self.is_real_content_change():
+                self.unsaved_changes = True
+                self.update_window_title()
+                self.status_bar.showMessage("Content modified - save needed", 5000)
+                
+    def is_real_content_change(self):
+        """Determine if the change is actual content or just view rendering"""
+        # Check if title changed
+        if self.course_combo.currentText() != self.original_title:
+            return True
+        
+        # Check if item count changed
+        if self.model.rowCount() != len(self.current_course.get('items', [])):
+            return True
+        
+        # Check if any item content changed
+        for row in range(self.model.rowCount()):
+            item = self.model.item(row)
+            data = item.data(QtCore.Qt.UserRole)
+            original_item = self.current_course['items'][row] if row < len(self.current_course['items']) else None
+            
+            if not original_item:
+                return True
+                
+            # Compare the actual content, ignoring display text
+            if data.get('user_data', {}) != original_item.get('user_data', {}):
+                return True
+            if data.get('data', {}) != original_item.get('data', {}):
+                return True
+                
+        return False
 
     # def load_course(self, course_id):
     #     """Load a course by ID with proper unsaved state handling"""
@@ -917,7 +1038,8 @@ class CourseManagerDialog(QtWidgets.QDialog):
             item = self.model.item(row).data(QtCore.Qt.UserRole)
             items.append(item)
         
-        course_title = self.title_edit.text()
+        # Get title from combo box
+        course_title = self.course_combo.currentText()
         
         if self.current_course:
             course_id = self.current_course['id']
@@ -928,8 +1050,9 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.current_course = self.db.get_course(new_id)
         self.course_modified.emit()
         self.unsaved_changes = False
-        self.original_title = self.title_edit.text()
+        self.original_title = course_title  # Update original title
         self.update_window_title()
+        self.update_course_dropdown()  # Refresh dropdown with new title
 
     def load_previous_course(self):
   
@@ -985,22 +1108,33 @@ class CourseManagerDialog(QtWidgets.QDialog):
                     #self.resize(250, 350) 
 
     def handle_title_changed(self, text):
-        """Only mark changes if not loading"""
+        #print(f"Title changed: '{self.original_title}' -> '{text}'")
         if not self.loading and text != self.original_title:
             self.mark_unsaved()
 
     def update_window_title(self):
         title = "Course Manager"
-        if self.current_course:
-            title += f" - {self.current_course['title']}"
+        current_title = self.course_combo.currentText()
+        if current_title:
+            title += f" - {current_title}"
         if self.unsaved_changes:
             title += " *"
+            # Add status bar message explaining why
+            if self.course_combo.currentText() != self.original_title:
+                self.status_bar.showMessage("Title modified - save needed", 5000)
+            elif self.model.rowCount() != len(self.current_course.get('items', [])):
+                self.status_bar.showMessage("Items changed - save needed", 5000)
+            else:
+                self.status_bar.showMessage("Content modified - save needed", 5000)
+        else:
+            self.status_bar.clearMessage()
         self.setWindowTitle(title)
 
-    def mark_unsaved(self):
-        if not self.unsaved_changes:
-            self.unsaved_changes = True
-            self.update_window_title()
+
+    # def mark_unsaved(self):
+    #     if not self.unsaved_changes:
+    #         self.unsaved_changes = True
+    #         self.update_window_title()
 
     def handle_enter_key(self):
         index = self.list_view.currentIndex()
@@ -1058,7 +1192,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
             content = data.get('user_data', {}).get('content', '')
             first_line = content.split('\n')[0].strip() if content else ''
             preview = f"...{first_line[:30]}"
-            item.setText(preview)
+            #item.setText(preview)
             if not self.preview_edit.isVisible():
                 self.preview_edit.show()
             self.preview_edit.setPlainText(content)
@@ -1212,7 +1346,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
         # Disable all controls except the current editing ones
         controls = [
             self.add_note_btn, self.remove_btn, self.move_up_btn, self.move_down_btn,
-            self.play_checkbox, self.preview_check, self.title_edit, self.prev_btn, self.next_btn,
+            self.play_checkbox, self.preview_check, self.course_combo, self.prev_btn, self.next_btn,
             self.print_btn, self.open_btn, self.edit_note_btn, self.dialog_btn
         ]
         
@@ -1277,6 +1411,10 @@ class CourseManagerDialog(QtWidgets.QDialog):
         #self.clear_recovery_file()
         event.accept()
 
+    def showPopup(self):
+        """Custom method to show dropdown"""
+        self.course_combo.showPopup()
+
     def eventFilter(self, source, event):
 
         # Block all events during note editing
@@ -1296,6 +1434,14 @@ class CourseManagerDialog(QtWidgets.QDialog):
                     return True
                     
             return super().eventFilter(source, event)
+
+
+        # Handle Enter key in course combo
+        if event.type() == QtCore.QEvent.KeyPress and source is self.course_combo:
+            if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+                # Open dropdown on Enter
+                self.course_combo.showPopup()
+                return True
 
         # Existing code for Ctrl+S in preview_edit
         if event.type() == QtCore.QEvent.KeyPress and source is self.preview_edit:
@@ -1361,7 +1507,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 items.append(data)
         
         output = []
-        title = self.title_edit.text()
+        title = self.course_combo.currentText()
         search_engine = self.parent().search_engine
         output.extend(["",])
         #output.extend(["========================================================================",])
