@@ -650,11 +650,15 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.print_btn = QtWidgets.QPushButton("Print")
         self.print_btn.clicked.connect(self.print_course)
 
+        self.refresh_btn = QtWidgets.QPushButton("Refresh")
+        self.refresh_btn.clicked.connect(self.refresh_course)
+
         self.open_btn = QtWidgets.QPushButton("Open")
         self.open_btn.clicked.connect(self.open_course_selection)
 
         self.dialog_btn.addButton(self.open_btn, QtWidgets.QDialogButtonBox.ActionRole)
         self.dialog_btn.addButton(self.print_btn, QtWidgets.QDialogButtonBox.ActionRole)
+        self.dialog_btn.addButton(self.refresh_btn, QtWidgets.QDialogButtonBox.ActionRole)
 
         # Button styling (unchanged)
         self.dialog_btn.accepted.connect(self.save_course)
@@ -803,6 +807,10 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 
         self.course_combo.blockSignals(False)
 
+    def refresh_course(self):
+        if self.current_course:
+            self.load_course(self.current_course['id'])
+
     def load_course(self, course_id):
 
         """Confirm before loading new course during editing"""
@@ -819,7 +827,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
             if reply == QtWidgets.QMessageBox.Cancel:
                 return
             elif reply == QtWidgets.QMessageBox.Save:
-                self.end_editing(save=True)
+                self.save_note()
 
         if not course_id:
             return
@@ -1363,6 +1371,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
 
         self.edit_mode = editing
 
+
     def save_note(self):
         """Save current note and exit edit mode"""
         if not hasattr(self, 'current_editing_index') or not self.current_editing_index:
@@ -1382,7 +1391,32 @@ class CourseManagerDialog(QtWidgets.QDialog):
         
         # Exit edit mode
         self.end_editing()
-        
+
+        # Save the entire course
+        self.save_course()
+
+        # save to recovery
+        recovery_file = os.path.join(
+            self.recovery_dir, 
+            f"note_recovery_{datetime.now().strftime('%s')}.txt"
+        )
+
+        try:
+            with open(recovery_file, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            
+            # Show status message with full path
+            self.status_bar.showMessage(
+                f"Auto-saved to: {os.path.abspath(recovery_file)}", 
+                30000
+            )
+        except Exception as e:
+            logging.error(f"Error saving recovery file: {str(e)}")
+            self.status_bar.showMessage(
+                f"Error saving recovery: {str(e)}", 
+                50000
+            )
+
         # Show status message
         self.status_bar.showMessage("Note saved", 30000)
 

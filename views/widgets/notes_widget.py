@@ -5,190 +5,148 @@ from models.search_engine import QuranSearch
 class NotesWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.statusBar = lambda: self.window().statusBar()
         self.db = DbManager()
         self.current_surah = None
         self.current_ayah = None
-        self.current_note_id = None
-        self.search_engine = QuranSearch()
+        self.original_content = ""
         self.init_ui()
 
     def init_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)  # No margins
-        layout.setSpacing(0)  # No spacing between elements
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
 
-        # Toolbar with back button
-        toolbar = QtWidgets.QWidget()
-        toolbar_layout = QtWidgets.QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(2, 2, 2, 2)  # Minimal padding
-        toolbar_layout.setSpacing(5)  # Small spacing between buttons
-
-        # Back button - first in toolbar
-        self.back_button = QtWidgets.QPushButton("← Back to Results")
-        self.back_button.setMinimumWidth(140)  # Wider than other buttons
-        self.back_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, 
-                                     QtWidgets.QSizePolicy.Fixed)
-        toolbar_layout.addWidget(self.back_button)
-
-        # Action buttons
-        self.new_button = QtWidgets.QToolButton()
-        self.new_button.setText("New")
-        self.save_button = QtWidgets.QToolButton()
-        self.save_button.setText("Save")
-        self.delete_button = QtWidgets.QToolButton()
-        self.delete_button.setText("Delete")
-
-        # Add buttons to toolbar
-        toolbar_layout.addWidget(self.new_button)
-        toolbar_layout.addWidget(self.save_button)
-        toolbar_layout.addWidget(self.delete_button)
-
-        # Spacer to push the label to the right
-        spacer = QtWidgets.QWidget()
-        spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, 
-                           QtWidgets.QSizePolicy.Preferred)
-        toolbar_layout.addWidget(spacer)
-
-        # Add a small label for the notes list
-        self.notes_label = QtWidgets.QLabel("تدبر الآية ")
-        self.notes_label.setStyleSheet("font-size: 10pt; font-weight: bold; margin-right: 10px;")
-        self.notes_label.setAlignment(QtCore.Qt.AlignVCenter)  # Vertically center the label
-        toolbar_layout.addWidget(self.notes_label)
-
-        # Split view for notes list and editor
-        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-
-        # Notes list
-        self.notes_list = QtWidgets.QListWidget()
-        self.notes_list.itemSelectionChanged.connect(self.on_note_selected)
-
-        # Set font size and styling
-        list_font = self.notes_list.font()
-        list_font.setPointSize(12)  # Increased from default 9-10
-        self.notes_list.setFont(list_font)
-
-        #Optional: Add padding and set minimum row height
-        self.notes_list.setStyleSheet("""
-            QListWidget::item {
-                padding: 8px;
-            }
-            QListWidget::item:selected {
-                color: palette(highlighted-text);
-                background: palette(highlight);
-            }
-        """)
-        self.notes_list.setMinimumHeight(100)
+        # Verse label
+        self.verse_label = QtWidgets.QLabel()
+        self.verse_label.setStyleSheet("font-size: 10pt; font-weight: bold;")
+        layout.addWidget(self.verse_label)
 
         # Editor
         self.editor = QtWidgets.QTextEdit()
         self.editor.setPlaceholderText("...أكتب هنا")
-        editor_font = self.notes_list.font()
-        editor_font.setPointSize(12)  # Increased from default 9-10
-        self.editor.setFont(editor_font)
+        font = self.editor.font()
+        font.setPointSize(12)
+        self.editor.setFont(font)
+        self.editor.setReadOnly(True)  # Default to read-only
+        self.editor.textChanged.connect(self.handle_text_change)
+        layout.addWidget(self.editor, 1)  # Take all available space
 
-        splitter.addWidget(self.notes_list)
-        splitter.addWidget(self.editor)
+        # Button container - single row for all controls
+        button_container = QtWidgets.QWidget()
+        button_layout = QtWidgets.QHBoxLayout(button_container)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Status label - left aligned
+        self.status_label = QtWidgets.QLabel()
+        self.status_label.setStyleSheet("font-size: 9pt; color: #666666;")
+        button_layout.addWidget(self.status_label)
+        
+        # Spacer to push other controls to the right
+        button_layout.addStretch(1)
+        
+        # Edit checkbox - middle right
+        self.edit_checkbox = QtWidgets.QCheckBox("تمكين التعديل")
+        self.edit_checkbox.stateChanged.connect(self.toggle_edit_mode)
+        button_layout.addWidget(self.edit_checkbox)
+        
+        # Back button
+        self.back_button = QtWidgets.QPushButton("رجوع")
+        self.back_button.setFixedSize(80, 30)
+        button_layout.addWidget(self.back_button)
+        
+        # Save button
+        self.save_button = QtWidgets.QPushButton("حفظ")
+        self.save_button.setFixedSize(80, 30)
+        self.save_button.setEnabled(False)  # Disabled by default
+        self.save_button.clicked.connect(self.save_note)
+        button_layout.addWidget(self.save_button)
 
-        # Set initial split ratio (1:3 ratio)
-        splitter.setSizes([self.height()//4, self.height()//4*3])
-
-        # Make editor resizing prioritized
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 3)
-
-        # Ensure proper initial layout
-        QtCore.QTimer.singleShot(100, lambda: splitter.setSizes([200, 300]))
-
-        layout.addWidget(toolbar)
-        layout.addWidget(splitter)
-
-        # Connections
-        self.new_button.triggered.connect(self.new_note)
-        self.save_button.triggered.connect(self.save_note)
-        self.delete_button.triggered.connect(self.delete_note)
+        layout.addWidget(button_container)
 
     def set_ayah(self, surah, ayah):
         self.current_surah = surah
         self.current_ayah = ayah
-        self.current_note_id = None
+        self.search_engine = QuranSearch()
         chapter = self.search_engine.get_chapter_name(self.current_surah)
-        self.notes_label.setText(f"تدبر الآية {self.current_ayah} من سورة {chapter}")
-        self.load_notes()
+        self.verse_label.setText(f"تدبر الآية {self.current_ayah} من سورة {chapter}")
+        self.load_note()
+        self.status_label.clear()
+        self.edit_checkbox.setChecked(False)  # Reset to read-only mode
 
-    def load_notes(self):
-        self.notes_list.clear()
+    def load_note(self):
+        """Load the single note for this verse"""
         notes = self.db.get_notes(self.current_surah, self.current_ayah)
-        for note in notes:
-            # Display first 80 characters as preview
-            preview = note['content'][:80]
-            if len(note['content']) > 80:
-                preview += "..."
+        if notes:
+            # Use the most recent note
+            self.original_content = notes[0]['content']
+            self.editor.setPlainText(self.original_content)
+        else:
+            self.original_content = ""
+            self.editor.clear()
+        self.save_button.setEnabled(False)
 
-            item = QtWidgets.QListWidgetItem(preview)
-            item.setData(QtCore.Qt.UserRole, note)
-            self.notes_list.addItem(item)
-        self.editor.clear()
+    def toggle_edit_mode(self, state):
+        """Toggle between read-only and edit mode"""
+        is_editable = state == QtCore.Qt.Checked
+        self.editor.setReadOnly(not is_editable)
+        
+        # Set visual indication of edit mode
+        if is_editable:
+            #self.editor.setStyleSheet("background-color: #FFFFCC;")  # Light yellow
+            self.status_label.setText("وضع التعديل مفعل")
+        else:
+            self.editor.setStyleSheet("")  # Reset to default
+            self.status_label.clear()
+            
+            # Revert to original content if not saved
+            current_content = self.editor.toPlainText().strip()
+            if current_content != self.original_content:
+                self.editor.setPlainText(self.original_content)
+            
+            self.save_button.setEnabled(False)
 
-    def on_note_selected(self):
-        selected = self.notes_list.currentItem()
-        if selected:
-            note = selected.data(QtCore.Qt.UserRole)
-            self.current_note_id = note['id']
-            self.editor.setPlainText(note['content'])
-
-    def new_note(self):
-        self.notes_list.clearSelection()
-        self.current_note_id = None
-        self.editor.clear()
-        self.editor.setFocus()
+    def handle_text_change(self):
+        """Enable save button only when content has changed"""
+        if self.editor.isReadOnly():
+            return
+            
+        current_content = self.editor.toPlainText().strip()
+        self.save_button.setEnabled(current_content != self.original_content)
 
     def save_note(self):
         if not (self.current_surah and self.current_ayah):
             return
 
-        content = self.editor.toPlainText().strip()
-        if not content:
+        current_content = self.editor.toPlainText().strip()
+        
+        # Check if content has actually changed
+        if current_content == self.original_content:
+            self.status_label.setText("لا يوجد تغيير!")
+            QtCore.QTimer.singleShot(2000, lambda: self.status_label.clear())
             return
-
-        if self.current_note_id:
-            self.db.update_note(self.current_note_id, content)
-        else:
-            self.db.add_note(self.current_surah, self.current_ayah, content)
-
-        self.load_notes()
-
-    def delete_note(self):
-        if self.current_note_id:
-            # Get note preview text
-            selected_item = self.notes_list.currentItem()
-            note_preview = selected_item.text() if selected_item else "this note"
-
-            # Create confirmation dialog
-            msg = QtWidgets.QMessageBox(self)
-            msg.setIcon(QtWidgets.QMessageBox.Warning)
-            msg.setWindowTitle("Confirm Deletion")
-            msg.setText(f"هل تريد حقا إزالة هذا التسجيل")
-            msg.setInformativeText(note_preview)
-            msg.setStandardButtons(
-                QtWidgets.QMessageBox.Yes |
-                QtWidgets.QMessageBox.No
-            )
-            msg.setDefaultButton(QtWidgets.QMessageBox.No)
-
-            # Add keyboard shortcuts
-            msg.button(QtWidgets.QMessageBox.Yes).setShortcut(QtGui.QKeySequence("Y"))
-            msg.button(QtWidgets.QMessageBox.No).setShortcut(QtGui.QKeySequence("N"))
-
-            # Show dialog and handle response
-            response = msg.exec_()
-            if response == QtWidgets.QMessageBox.Yes:
-                self.db.delete_note(self.current_note_id)
-                self.load_notes()
-                self.statusBar().showMessage("Note deleted successfully", 2000)
-
-    def delete_all_notes(self):
-        if self.current_surah and self.current_ayah:
-            self.db.delete_all_notes(self.current_surah, self.current_ayah)
-            self.load_notes()
-
+            
+        # Show confirmation dialog
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "تأكيد الحفظ",
+            "هل تريد حفظ التغييرات؟",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.No:
+            self.status_label.setText("تم الإلغاء")
+            QtCore.QTimer.singleShot(2000, lambda: self.status_label.clear())
+            return
+            
+        # Delete any existing notes for this verse
+        self.db.delete_all_notes(self.current_surah, self.current_ayah)
+        
+        if current_content:
+            # Create new note
+            self.db.add_note(self.current_surah, self.current_ayah, current_content)
+            self.original_content = current_content
+            self.status_label.setText("تم الحفظ!")
+            self.save_button.setEnabled(False)
+            
+            # Clear status message after 2 seconds
+            QtCore.QTimer.singleShot(2000, lambda: self.status_label.clear())

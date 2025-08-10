@@ -14,6 +14,7 @@ class DbManager:
         app_data_path.mkdir(parents=True, exist_ok=True)
         self.db_path = app_data_path / "quran_notes.db"
         self._init_db()
+        self._create_pinned_table()
 
     def _init_db(self):
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -343,3 +344,58 @@ class DbManager:
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.execute("SELECT COUNT(*) FROM courses WHERE items = ?", (items_json,))
             return cursor.fetchone()[0] > 0
+
+    
+    def _create_pinned_table(self):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS pinned_verses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    surah INTEGER NOT NULL,
+                    ayah INTEGER NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(surah, ayah)
+                )
+            ''')
+            conn.commit()
+    
+    def add_pinned_verse(self, surah, ayah):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO pinned_verses (surah, ayah) VALUES (?, ?)",
+                    (surah, ayah)
+                )
+                conn.commit()
+                return True
+            except sqlite3.Error as e:
+                print(f"Error adding pinned verse: {e}")
+                return False
+        
+    def remove_pinned_verse(self, surah, ayah):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            try:
+                conn.execute(
+                    "DELETE FROM pinned_verses WHERE surah=? AND ayah=?",
+                    (surah, ayah)
+                )
+                conn.commit()
+                return True
+            except sqlite3.Error as e:
+                print(f"Error removing pinned verse: {e}")
+                return False
+    
+    def get_all_pinned_verses(self):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            try:
+                cursor = conn.execute(
+                    "SELECT surah, ayah, timestamp FROM pinned_verses ORDER BY timestamp DESC"
+                )
+                return [{
+                    'surah': row[0],
+                    'ayah': row[1],
+                    'timestamp': row[2]
+                } for row in cursor]
+            except sqlite3.Error as e:
+                print(f"Error getting pinned verses: {e}")
+                return []

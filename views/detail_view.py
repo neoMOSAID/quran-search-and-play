@@ -7,34 +7,28 @@ class DetailView(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.notes_widget = NotesWidget()
+        self.notes_widget.back_button.clicked.connect(self.backRequested.emit)
         self.initUI()
 
-
     def initUI(self):
-        # Split view
-        splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
-
-        # Context View (removed back button from here)
-        context_widget = QtWidgets.QWidget()
-        context_layout = QtWidgets.QVBoxLayout(context_widget)
-        context_layout.setContentsMargins(2, 2, 2, 2)  # Reduced margins
-        context_layout.setSpacing(0)
-        self.text_browser = QtWidgets.QTextBrowser()
-        context_layout.addWidget(self.text_browser)
-
-        # Add widgets to splitter
-        splitter.addWidget(context_widget)
-        splitter.addWidget(self.notes_widget)
-        splitter.setSizes([300, 200])  # Allocate more space to context view
-
-        # Main layout
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(splitter)
 
-        # Connect notes widget's back button
-        self.notes_widget.back_button.clicked.connect(self.backRequested.emit)
+        # Create a vertical splitter
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        
+        # Context View
+        self.text_browser = QtWidgets.QTextBrowser()
+        splitter.addWidget(self.text_browser)
+        
+        # Notes widget
+        splitter.addWidget(self.notes_widget)
+        
+        # Set initial sizes (context view gets 70%, notes 30%)
+        splitter.setSizes([700, 300])
+        
+        layout.addWidget(splitter)
 
     def display_ayah(self, result, search_engine, version, is_dark_theme):
         verses = search_engine.get_ayah_with_context(result['surah'], result['ayah'])

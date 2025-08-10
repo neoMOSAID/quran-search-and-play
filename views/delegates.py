@@ -5,13 +5,6 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtGui import QColor
 from utils.settings import AppSettings
 
-#class QuranDelegate(QtWidgets.QStyledItemDelegate):
-    # Keep all original methods:
-    # - update_font_size
-    # - update_theme
-    # - paint
-    # - sizeHint
-
 
 class QuranDelegate(QtWidgets.QStyledItemDelegate):
     """Custom delegate for rendering Quran verses with proper RTL support."""
@@ -45,9 +38,22 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
 
     def paint(self, painter, option, index):
         painter.save()
+        result = index.data(QtCore.Qt.UserRole)
+
+        # Check if pinned
+        is_pinned = hasattr(self.parent().window(), 'pinned_verses') and any(
+            v['surah'] == result['surah'] and v['ayah'] == result['ayah']
+            for v in self.parent().window().pinned_verses
+        )
+
+        # Draw pinned background (only if not selected)
+        if is_pinned and not (option.state & QtWidgets.QStyle.State_Selected):
+            bg_color = QtGui.QColor("#3b3b1f" if self.is_dark else "#F0E68C")
+            painter.fillRect(option.rect, bg_color)
+
+        # Render text
         doc = QtGui.QTextDocument()
         doc.setDocumentMargin(2)
-        result = index.data(QtCore.Qt.UserRole)
         text = self._format_text(result, self.version)
         doc.setHtml(text)
         text_option = doc.defaultTextOption()
@@ -57,10 +63,7 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         doc.setTextWidth(option.rect.width() - 20)
 
         if option.state & QtWidgets.QStyle.State_Selected:
-            option.palette.setColor(QtGui.QPalette.Highlight, QColor(self.highlight_color))
-            option.palette.setColor(QtGui.QPalette.HighlightedText, QColor("#ffffff"))
             painter.fillRect(option.rect, option.palette.highlight())
-            doc.setDefaultStyleSheet(f"body {{ color: {option.palette.highlightedText().color().name()}; }}")
 
         painter.translate(option.rect.topLeft())
         doc.drawContents(painter)
@@ -68,19 +71,52 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
 
     def _format_text(self, result, version):
         text = result.get(f"text_{version}", "")
+
+        # Check if verse is pinned
+        is_pinned = hasattr(self.parent().window(), 'pinned_verses') and any(
+            v['surah'] == result['surah'] and v['ayah'] == result['ayah']
+            for v in self.parent().window().pinned_verses
+        )
+
+        # Indicator icon
+        pin_indicator = """<span style="color: goldenrod;">&#9733;</span> """ if is_pinned else ""
+
+        # Background color depending on theme
+        pinned_bg = "#3b3b1f" if self.is_dark else "#F0E68C"  # Dark: olive-brown / Light: cornsilk
+        normal_bg = "transparent"
+
+        bg_color = pinned_bg if is_pinned else normal_bg
+        
+        # Apply highlighting if enabled
+        main_window = self.parent().window()
+        if hasattr(main_window, 'highlight_action') and main_window.highlight_action.isChecked():
+            highlight_words = main_window.highlight_words
+            if highlight_words:
+                is_dark = main_window.theme_action.isChecked()
+                highlight_color = "yellow" if is_dark else "red"
+                
+                # Apply highlighting for each word
+                for word in highlight_words:
+                    # Replace every occurrence of the word with highlighted version
+                    text = text.replace(
+                        word, 
+                        f"<span style='color: {highlight_color};'>{word}</span>"
+                    )
+
         return f"""
-        <div dir="rtl" style="text-align:left;">
-            <div style="font-family: 'Amiri'; 
+        <div dir="rtl" style="text-align:left; background-color: {bg_color}; width:100%; margin:0; padding:10px;">
+            <div style="font-family: 'Amiri';
                         font-size: {self.base_font_size}pt;
                         margin: 5px;">
-                {text}
-                <span style="color: #006400; 
+                {pin_indicator}{text}
+                <span style="color: #006400;
                             font-size: {self.base_font_size - 2}pt;">
                     ({result.get('surah', '')}-{result.get('chapter', '')} {result.get('ayah', '')})
                 </span>
             </div>
         </div>
         """
+
 
     def sizeHint(self, option, index):
         result = index.data(QtCore.Qt.UserRole)

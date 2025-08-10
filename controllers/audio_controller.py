@@ -169,19 +169,6 @@ class AudioController:
                 self.parent._scroll_to_ayah(current_surah, current_ayah)
             self.current_sequence_index += 1
         else:
-#             print(
-#                 f"""
-#                 self.playing_one : {self.playing_one}\n
-#                 self.playing_context: {self.playing_context}\n
-#                 self.playing_range: {self.playing_range}\n
-#                 self.playing_ayah_range: {self.playing_ayah_range}\n
-#                 self.current_surah : {self.current_surah }\n
-#                 self.current_start_ayah: {self.current_start_ayah}\n
-#                 self.current_sequence_index: {self.current_sequence_index}\n
-#                 self.repeat_all: {self.repeat_all}\n
-# ==============================================================================\n
-#                 """
-#             )
             if self.repeat_all: 
                 if self.max_repeats > 0:
                     self.repeat_count += 1
@@ -249,22 +236,28 @@ class AudioController:
 
 
     def play_all_results(self):
-        """Play all verses in the current search results list."""
+        """Play all verses in the current search results list, skipping pinned verses not in actual results."""
         if not self.parent.model.results:
             self.parent.showMessage("No results to play", 3000, bg="red")
             return
 
+        # Create set of actual result verse identifiers
+        actual_verse_ids = set()
+        for result in self.parent.model.results:
+            if not result.get('is_pinned', False):  # Only non-pinned are actual results
+                verse_id = f"{result['surah']}-{result['ayah']}"
+                actual_verse_ids.add(verse_id)
         audio_dir = get_audio_directory()
         self.sequence_files = []
-        self.sequence_rows = []  # Track which model rows we're playing
 
-        # Build list of valid audio files and their corresponding result rows
-        for row in range(self.parent.model.rowCount()):
-            index = self.parent.model.index(row, 0)
-            result = self.parent.model.data(index, QtCore.Qt.UserRole)
-            if not result:
-                continue
-            
+        # Build list of valid audio files
+        for result in self.parent.model.results:
+            # Skip pinned verses not in actual results
+            if result.get('is_pinned', False):
+                verse_id = f"{result['surah']}-{result['ayah']}"
+                if verse_id not in actual_verse_ids:
+                    continue
+                    
             try:
                 surah = int(result['surah'])
                 ayah = int(result['ayah'])
@@ -274,11 +267,9 @@ class AudioController:
             file_path = os.path.join(audio_dir, f"{surah:03d}{ayah:03d}.mp3")
             if os.path.exists(file_path):
                 self.sequence_files.append(os.path.abspath(file_path))
-                self.sequence_rows.append(row)
-            else:
-                self.parent.showMessage(f"Audio not found: Surah {surah} Ayah {ayah}", 3000, bg="red")
 
         if self.sequence_files:
+            # ... rest of the method unchanged ...
             index = self.parent.results_view.currentIndex()
             self.current_sequence_index = 0
             if index.isValid():
@@ -327,16 +318,21 @@ class AudioController:
             return
 
         index = self.parent.results_view.currentIndex()
-        if not index.isValid():
-            self.parent.showMessage("No verse selected", 2000, bg="red")
-            return
+        if index.isValid():
+            result = self.parent.model.data(index, QtCore.Qt.UserRole)
+            try:
+                surah = int(result.get('surah'))
+                selected_ayah = int(result.get('ayah'))
+            except Exception as e:
+                self.parent.showMessage("Invalid surah or ayah information", 2000, bg="red")
+                return
+        else:
+            surah = self.parent.current_view.get('surah',1)
+            selected_ayah = 0
 
-        result = self.parent.model.data(index, QtCore.Qt.UserRole)
-        try:
-            surah = int(result.get('surah'))
-            selected_ayah = int(result.get('ayah'))
-        except Exception as e:
-            self.parent.showMessage("Invalid surah or ayah information", 2000, bg="red")
+        is_dark = self.parent.theme_action.isChecked()
+        results = self.parent.search_engine.search_by_surah(surah, is_dark, [])
+        if not results:
             return
 
         # Retrieve the audio directory from the INI file.
@@ -344,13 +340,14 @@ class AudioController:
         sequence_files = []
 
         # Loop through possible ayahs (from 1 to 300 is a safe upper bound).
-        for ayah in range(1, 300):
-            file_path = os.path.join(audio_dir, f"{surah:03d}{ayah:03d}.mp3")
-            if os.path.exists(file_path):
-                sequence_files.append(os.path.abspath(file_path))
-            else:
-                # Stop adding files when an ayah is missing, assuming that's the end.
-                break
+        for res in results:
+            try:
+                ayah_num = int(res['ayah'])
+                file_path = os.path.join(audio_dir, f"{surah:03d}{ayah_num:03d}.mp3")
+                if os.path.exists(file_path):
+                    sequence_files.append(os.path.abspath(file_path))
+            except (KeyError, ValueError):
+                continue
 
         if not sequence_files:
             self.parent.showMessage("No audio files found for current surah", 3000, bg="red")
@@ -369,39 +366,6 @@ class AudioController:
             self.current_sequence_index = 0
 
         self.play_next_file()  # This method will chain playback for the sequence.
-
-    def play_ayah_range(self, surah, start, end):
-        #self.showMessage(f"{surah}:{start}--{end}", 5000)
-        try:
-            results = self.search_engine.search_by_surah_ayah(surah, start, end)
-            if results:
-                for result in results:
-                    if self.parent.db.has_note(result['surah'], result['ayah']):
-                        #bullet = "◉ "  # smaller bullet than "●" "• "
-                        bullet = "<span style='font-size:32px;'>•</span> "
-                        result['text_simplified'] = bullet + result['text_simplified']
-                        result['text_uthmani'] = bullet + result['text_uthmani']
-                self.parent.model.updateResults(results)
-                self.current_surah = surah
-                self.current_start_ayah = start
-                self.sequence_files = []
-
-                # Build file list
-                audio_dir = get_audio_directory()
-                for ayah in range(start, end+1):
-                    file_path = os.path.join(audio_dir, f"{surah:03d}{ayah:03d}.mp3")
-                    if os.path.exists(file_path):
-                        self.sequence_files.append(os.path.abspath(file_path))
-
-                if self.sequence_files:
-                    self.current_sequence_index = 0
-                    self.playing_ayah_range = True
-                    self.play_next_file()
-                else:
-                    self.parent.showMessage("No audio files found for selection", 5000, bg="red")
-        except Exception as e:
-            logging.error(f"Error playing ayah range: {str(e)}")
-            self.parent.showMessage("Error playing selection", 5000, bg="red")
 
 
     def choose_audio_directory(self):

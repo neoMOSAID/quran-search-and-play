@@ -2,6 +2,12 @@
 import re
 import json
 import logging 
+from datetime import datetime
+from pathlib import Path
+from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSettings
+from PyQt5.QtGui import QKeySequence
+from PyQt5.QtWidgets import QApplication, QMainWindow, QShortcut
 
 from PyQt5 import QtWidgets, QtCore, QtGui
 from models.quran_model import QuranListModel
@@ -22,6 +28,8 @@ from views.dialogs.notes_manager import NotesManagerDialog
 from views.dialogs.notes_dialog import NoteDialog
 from views.dialogs.data_transfer import DataTransferDialog
 from views.dialogs.help_dialog import HelpDialog
+#from views.dialogs.pinned_dialog import PinnedVersesDialog
+
 
 from PyQt5.QtWidgets import QInputDialog
 # =============================================================================
@@ -38,10 +46,15 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.notes_dialog = None
         self.compact_help_dialog = None
         self.current_detail_result = None
+        self.current_view = None  # Will track {'type': 'surah'/'search', 'surah': x, 'method': y, 'query': z}
+
         self._status_msg = ""
         self.temporary_message_active = False
         self.message_timer = QtCore.QTimer()
         self.message_timer.timeout.connect(self.revert_status_message)
+
+        # self.pinned_dialog = PinnedVersesDialog(self)
+        # self.pinned_dialog.verse_selected.connect(self.load_and_show_ayah)
 
         self.highlight_action = None
         self.highlight_color = "#FFD700"  # Gold color for highlighting
@@ -55,6 +68,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.audio_controller = AudioController(self)
 
         self.db = DbManager()
+
+        self.pinned_verses = self.db.get_all_pinned_verses()
+
 
         self.settings = AppSettings()
         self.theme_action = None
@@ -223,6 +239,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+L"), self, 
                             activated=self.configure_highlight_words)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+P"), self, activated=self.handle_ctrlp)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+O"), self, activated=self.pin_current_verse)
         #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+R"), self, activated=self.handle_ctrlr)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+R"), self, activated=self.handle_repeat_all_results)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+R"), self, 
@@ -464,6 +481,66 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.showMessage("Note saved successfully", 2000)
 
 
+    def pin_current_verse(self):
+        index = self.results_view.currentIndex()
+        if not index.isValid():
+            return
+            
+        result = self.model.data(index, QtCore.Qt.UserRole)
+        if not result:
+            return
+            
+        try:
+            surah = int(result['surah'])
+            ayah = int(result['ayah'])
+        except (ValueError, TypeError):
+            return
+            
+        # Check if already pinned
+        key = (surah, ayah)
+        found = False
+        for i, verse in enumerate(self.pinned_verses):
+            if (verse['surah'], verse['ayah']) == key:
+                # Unpin
+                if self.db.remove_pinned_verse(surah, ayah):
+                    del self.pinned_verses[i]
+                    self.showMessage("تم إزالة التثبيت", 2000)
+                    found = True
+                break
+                
+        if not found:
+            # Pin
+            if self.db.add_pinned_verse(surah, ayah):
+                # Add minimal data to pinned verses
+                self.pinned_verses.append({
+                    'surah': surah,
+                    'ayah': ayah,
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+                self.showMessage("تم تثبيت الآية", 2000)
+        
+        # Refresh current view
+        self.refresh_current_view()
+
+    def refresh_current_view(self):
+        """Refresh the current view to update pinned verses"""
+        if self.current_view is None:
+            return
+            
+        if self.current_view['type'] == 'surah':
+            self.handle_surah_selection(self.current_view['surah'] - 1)
+        elif self.current_view['type'] == 'search':
+            self.search_method_combo.setCurrentText(self.current_view['method'])
+            self.search_input.setText(self.current_view['query'])
+            self.search()
+
+                
+    # def show_pinned_dialog(self):
+    #     dialog = PinnedVersesDialog(self.pinned_verses, self.search_engine, self)
+    #     dialog.verseSelected.connect(self.load_and_show_ayah)
+    #     dialog.exec_()
+
+
     def setup_menu(self):
         menu = self.menuBar().addMenu("&Menu")
         
@@ -475,7 +552,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         
         # Highlighting (Ctrl+Shift+L)
         self.highlight_action = QtWidgets.QAction("Word Highlighting", self, checkable=True)
-        self.highlight_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+L"))
+        #self.highlight_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+L"))
         self.highlight_action.toggled.connect(self.toggle_highlighting)
         menu.addAction(self.highlight_action)
 
@@ -502,6 +579,12 @@ class QuranBrowser(QtWidgets.QMainWindow):
         course_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+T"))
         course_action.triggered.connect(self.show_course_manager)
         menu.addAction(course_action)
+
+        # pinned_action = QtWidgets.QAction("Pinned Verses", self)
+        # pinned_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+O"))
+        # pinned_action.triggered.connect(self.show_pinned_dialog)
+        # menu.addAction(pinned_action)
+
 
         # Data Transfer (Ctrl+Shift+E)
         data_transfer_action = QtWidgets.QAction("Data Transfer", self)
@@ -654,6 +737,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         if index < 0:
             index = self.surah_combo.currentIndex()
         surah = index + 1
+        self.current_view = {'type': 'surah', 'surah': surah}
         try:
             is_dark_theme = self.theme_action.isChecked()
             results = self.search_engine.search_by_surah(surah, is_dark_theme, self.highlight_words)
@@ -782,9 +866,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.search_worker.start()
 
     def handle_search_results(self,method, results,total_occurrences):
-        self.model.updateResults(results)
-        self.results_count_int = len(results)
-        self.result_count.setText(f"Found {self.results_count_int} results, {total_occurrences}")
+        self.current_view = {'type': 'search', 'method': method, 'query': self.search_input.text()}
+        self.update_results(results)
+        self.total_occurrences = total_occurrences
         self.total_occurrences = total_occurrences
         if method == "Text":
             self.status_msg = f" مرات {total_occurrences} تكرار"
@@ -803,17 +887,44 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
     def finalize_results(self):
         self.results_count_int = len(self.model.results)
-        self.result_count.setText(f"Found {self.results_count_int} results.")
         self.model.loading_complete.disconnect()  # Clean up connection
 
-    def update_results(self, results, query):
-        self.model.updateResults(results)
-        self.results_count_int = len(results)
-        self.result_count.setText(f"Found {self.results_count_int} results.")
+    def update_results(self, results, query=None):
+
+        pinned_full = []
+        for pin in self.pinned_verses:
+            try:
+                verse_uthmani = self.search_engine.get_verse(pin['surah'], pin['ayah'], 'uthmani')
+                verse_simplified = self.search_engine.get_verse(pin['surah'], pin['ayah'], 'simplified')
+                pinned_full.append({
+                    'surah': pin['surah'],
+                    'ayah': pin['ayah'],
+                    'text_uthmani': verse_uthmani,
+                    'text_simplified': verse_simplified,
+                    'chapter': self.search_engine.get_chapter_name(pin['surah']),
+                    'is_pinned': True  # Add pin flag
+                })
+            except Exception as e:
+                print(f"Error loading pinned verse: {e}")
+
+        # Combine pinned verses with current results
+        combined_results = list(pinned_full) + list(results)
+            
+        # Update model with combined results
+        self.model.updateResults(combined_results)
+        self.results_count_int = len(combined_results)
+        
+        # Set status message
+        if query and "Surah" in query:
+            self.status_msg = ""
+        self.updatePermanentStatus()
+        
         if results:
             self.results_view.setFocus()
+        
         # Force immediate scroll check
-        QtCore.QTimer.singleShot(500, self.handle_pending_scroll)
+        QtCore.QTimer.singleShot(500, self.handle_pending_scroll)        
+
 
     def show_detail_view(self, index):
         if isinstance(index, QtCore.QModelIndex):
@@ -895,7 +1006,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def handle_ctrlp(self):
         self.playing_context = 1
         self.status_msg = "إستماع الى الأية وخمسة بعدها"
-        self.play_current(count=6)
+        self.audio_controller.play_current(count=6)
 
     def handle_ctrlr(self):
         method = self.search_method_combo.currentText()
@@ -904,7 +1015,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             return
         self.playing_range = 1
         self.playing_range_max = self.results_count_int
-        self.play_current(count=self.playing_range_max)
+        self.audio_controller.play_current(count=self.playing_range_max)
 
     def handle_repeat_all_results(self, limited=False):
         """Handle repeating with optional limit"""
@@ -1027,10 +1138,16 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def _scroll_to_ayah(self, surah, ayah):
         """Enhanced scroll function with progressive loading"""
         self.results_view.selectionModel().clearSelection()
-        # First try existing items
+        
+        # First try non-pinned items (actual results)
         for row in range(self.model.rowCount()):
             index = self.model.index(row, 0)
             result = self.model.data(index, QtCore.Qt.UserRole)
+            
+            # Skip pinned verses when in surah view
+            if self.current_view and self.current_view['type'] == 'surah' and result.get('is_pinned', False):
+                continue
+                
             if (result['surah'] == surah and 
                 result['ayah'] == ayah):
                 self.results_view.setCurrentIndex(index)
@@ -1038,7 +1155,19 @@ class QuranBrowser(QtWidgets.QMainWindow):
                     QtWidgets.QAbstractItemView.PositionAtCenter)
                 return True
                 
-        # If not found, check if more results need loading
+        # If not found, check pinned verses only if not in surah view
+        if not (self.current_view and self.current_view['type'] == 'surah'):
+            for row in range(self.model.rowCount()):
+                index = self.model.index(row, 0)
+                result = self.model.data(index, QtCore.Qt.UserRole)
+                if (result['surah'] == surah and 
+                    result['ayah'] == ayah):
+                    self.results_view.setCurrentIndex(index)
+                    self.results_view.scrollTo(index, 
+                        QtWidgets.QAbstractItemView.PositionAtCenter)
+                    return True
+                    
+        # If still not found, check if more results need loading
         if self.model._displayed_results < len(self.model.results):
             self.model.load_remaining_results()
             
@@ -1149,6 +1278,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         self.db.save_course(course_id, title, updated_items)
         self.showMessage(f"Added {len(entries)} entries to course: {title}", 3000)
+        if hasattr(self, 'course_dialog') and self.course_dialog:
+            self.course_dialog.refresh_course()
 
     def bookmark_current_ayah(self):
         index = self.results_view.currentIndex()
@@ -1272,6 +1403,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.model.updateResults([])
         self.result_count.clear()
         self.surah_combo.setCurrentIndex(0)
+        self.current_view = None
 
     def about_dialog(self):
         QtWidgets.QMessageBox.about(
