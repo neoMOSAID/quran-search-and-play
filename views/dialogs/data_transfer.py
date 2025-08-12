@@ -9,6 +9,10 @@ from utils.settings import AppSettings
 
 
 class DataTransferDialog(QtWidgets.QDialog):
+    coursesChanged = QtCore.pyqtSignal()
+    notesChanged = QtCore.pyqtSignal()
+    bookmarksChanged = QtCore.pyqtSignal()
+    pinnedChanged = QtCore.pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
@@ -44,6 +48,7 @@ class DataTransferDialog(QtWidgets.QDialog):
             'courses': QtWidgets.QPushButton("Courses"),
             'notes': QtWidgets.QPushButton("Notes"),
             'bookmarks': QtWidgets.QPushButton("Bookmarks"),
+            'pinned': QtWidgets.QPushButton("Pinned Verses"), 
             'all': QtWidgets.QPushButton("Full Backup")
         }
         
@@ -62,6 +67,7 @@ class DataTransferDialog(QtWidgets.QDialog):
             'courses': QtWidgets.QPushButton("Courses"),
             'notes': QtWidgets.QPushButton("Notes"),
             'bookmarks': QtWidgets.QPushButton("Bookmarks"),
+            'pinned': QtWidgets.QPushButton("Pinned Verses"), 
             'all': QtWidgets.QPushButton("Full Backup")
         }
         
@@ -150,6 +156,14 @@ class DataTransferDialog(QtWidgets.QDialog):
                     zipf.writestr('bookmarks.json', json.dumps(bookmarks, ensure_ascii=False))
                     manifest['types'].append('bookmarks')
 
+                # Export pinned groups and verses
+                if data_type in ['pinned', 'all']:
+                    self.update_progress("Exporting pinned verses data...")
+                    groups = self.db.get_pinned_groups()
+                    verses = self.db.get_all_pinned_verses()
+                    zipf.writestr('pinned_groups.json', json.dumps(groups, ensure_ascii=False, default=str))
+                    zipf.writestr('pinned_verses.json', json.dumps(verses, ensure_ascii=False, default=str))
+
                 # Add manifest
                 zipf.writestr('manifest.json', json.dumps(manifest))
                 self.update_progress(f"Export completed successfully to:\n{file_path}")
@@ -229,6 +243,7 @@ class DataTransferDialog(QtWidgets.QDialog):
                         # Save with deduplicated title
                         self.db.save_course(None, new_title, normalized_items)
                         self.update_progress(f"Added new course: '{new_title}'")
+                    self.coursesChanged.emit()
 
                 # Import notes
                 if data_type in ['notes', 'all'] and 'notes.json' in zipf.namelist():
@@ -238,6 +253,7 @@ class DataTransferDialog(QtWidgets.QDialog):
                         if not self.db.note_exists(note['surah'], note['ayah'], note['content']):
                             self.db.add_note(note['surah'], note['ayah'], note['content'])
                             self.update_progress(f"Added note for {note['surah']}:{note['ayah']}")
+                    self.notesChanged.emit()
                 
                 # Import bookmarks
                 if data_type in ['bookmarks', 'all'] and 'bookmarks.json' in zipf.namelist():
@@ -246,6 +262,33 @@ class DataTransferDialog(QtWidgets.QDialog):
                     for bm in bookmarks:
                         self.db.add_bookmark(bm['surah'], bm['ayah'])
                         self.update_progress(f"Added bookmark for {bm['surah']}:{bm['ayah']}")
+                    self.bookmarksChanged.emit()
+
+                # Import pinned groups and verses
+                if data_type in ['pinned', 'all'] and 'pinned_groups.json' in zipf.namelist() and 'pinned_verses.json' in zipf.namelist():
+                    self.update_progress("Importing pinned verses data...")
+                    imported_groups = json.loads(zipf.read('pinned_groups.json').decode('utf-8'))
+                    imported_verses = json.loads(zipf.read('pinned_verses.json').decode('utf-8'))
+                    
+                    # Create groups and build mapping
+                    group_mapping = {}
+                    for group in imported_groups:
+                        # Create group if it doesn't exist
+                        if not any(g['name'] == group['name'] for g in self.db.get_pinned_groups()):
+                            new_id = self.db.create_pinned_group(group['name'])
+                            if new_id:
+                                group_mapping[group['id']] = new_id
+                    
+                    # Add verses to groups
+                    for verse in imported_verses:
+                        if verse['group_id'] in group_mapping:
+                            self.db.add_pinned_verse(
+                                verse['surah'], 
+                                verse['ayah'], 
+                                group_mapping[verse['group_id']]
+                            )
+                    self.pinnedChanged.emit()
+
 
                 self.update_progress("Import completed successfully")
 

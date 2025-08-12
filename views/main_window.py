@@ -418,7 +418,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def show_course_manager(self):
         if not hasattr(self, 'course_dialog') or not self.course_dialog:
             self.course_dialog = CourseManagerDialog(self.db, self.search_engine, self)    
-            self.course_dialog.play_requested.connect(self.audio_controller.play_ayah_range)
+            self.course_dialog.play_requested.connect(self.audio_controller.play_current)
             self.course_dialog.search_requested.connect(self.handle_course_search)
         self.course_dialog.show()
 
@@ -714,7 +714,36 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
     def show_data_transfer(self):
         dialog = DataTransferDialog(self)
+        dialog.coursesChanged.connect(self.refresh_courses)
+        dialog.notesChanged.connect(self.refresh_notes)
+        dialog.bookmarksChanged.connect(self.refresh_bookmarks)
+        dialog.pinnedChanged.connect(self.refresh_pinned)
         dialog.exec_()
+    
+    def refresh_courses(self):
+        if hasattr(self, 'course_dialog') and self.course_dialog:
+            self.course_dialog.refresh_course()
+            
+    def refresh_notes(self):
+        # Refresh detail view notes
+        if self.detail_view.isVisible():
+            self.detail_view.notes_widget.load_notes()
+        # Refresh notes manager if open
+        if hasattr(self, 'notes_dialog') and self.notes_dialog:
+            self.notes_dialog.load_notes()
+            
+    def refresh_bookmarks(self):
+        if hasattr(self, 'bookmark_dialog') and self.bookmark_dialog:
+            self.bookmark_dialog.load_bookmarks()
+            
+    def refresh_pinned(self):
+        # Refresh main window pinned verses
+        self.pinned_verses = self.db.get_active_pinned_verses()
+        # Refresh current view to show new pins
+        self.refresh_current_view()
+        # Refresh pinned dialog if open
+        if hasattr(self, 'pinned_dialog') and self.pinned_dialog:
+            self.pinned_dialog.load_groups()
 
     def load_settings(self):
         geometry = self.settings.value("geometry")
@@ -1194,22 +1223,23 @@ class QuranBrowser(QtWidgets.QMainWindow):
             
         return False
 
-
     def add_ayah_to_course(self):
-        reply = QtWidgets.QMessageBox.question(
-            self,
-            'Unsaved Changes',
-            'You have unsaved changes in the course manager. Save changes first?',
-            QtWidgets.QMessageBox.Save | 
-            QtWidgets.QMessageBox.Discard |
-            QtWidgets.QMessageBox.Cancel
-        )
-        
-        if reply == QtWidgets.QMessageBox.Cancel:
-            return
-        elif reply == QtWidgets.QMessageBox.Save:
-            self.course_dialog.save_course()
+        # Only check for unsaved changes if course dialog exists
+        if hasattr(self, 'course_dialog') and self.course_dialog and self.course_dialog.unsaved_changes:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                'Unsaved Changes',
+                'You have unsaved changes in the course manager. Save changes first?',
+                QtWidgets.QMessageBox.Save | 
+                QtWidgets.QMessageBox.Discard |
+                QtWidgets.QMessageBox.Cancel
+            )
             
+            if reply == QtWidgets.QMessageBox.Cancel:
+                return
+            elif reply == QtWidgets.QMessageBox.Save:
+                self.course_dialog.save_course()
+                
         selected = self.results_view.selectionModel().selectedIndexes()
         if not selected:
             self.showMessage("No verses selected", 3000, bg="red")
@@ -1236,8 +1266,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
             course_id = dialog.get_selected_course()
             if course_id:
                 self._add_to_course(course_id, ayahs)
-                self.show_course_manager()
-                self.course_dialog.load_course(course_id)
+                # Only show course manager if it exists
+                if hasattr(self, 'course_dialog') and self.course_dialog:
+                    self.course_dialog.load_course(course_id)
 
     def _add_to_course(self, course_id, ayahs):
         # Group ayahs by surah and find consecutive clusters

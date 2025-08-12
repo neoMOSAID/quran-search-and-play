@@ -77,6 +77,24 @@ class DbManager:
                 VALUES ('Default', 1)
             """)
 
+            # Check if any pinned verses exist
+            cursor = conn.execute("SELECT COUNT(*) FROM pinned_verses")
+            if cursor.fetchone()[0] == 0:
+                # Add default verses only if no verses exist
+                default_group_id = 1
+                default_verses = [
+                    (11, 1),   # Surah 11 verse 1
+                    (12, 111), # Surah 12 verse 111
+                    (10, 37),  # Surah 10 verse 37
+                    (16, 89)   # Surah 16 verse 89
+                ]
+                
+                for surah, ayah in default_verses:
+                    conn.execute("""
+                        INSERT OR IGNORE INTO pinned_verses (surah, ayah, group_id)
+                        VALUES (?, ?, ?)
+                    """, (surah, ayah, default_group_id))            
+
     def get_notes(self, surah, ayah):
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.execute("""
@@ -528,3 +546,21 @@ class DbManager:
                 'ayah': row[1],
                 'timestamp': row[2]
             } for row in cursor]
+
+    def get_all_pinned_verses(self):
+        """Get all pinned verses with group information"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT pv.id, pv.surah, pv.ayah, pv.group_id, pv.timestamp,
+                    pg.name as group_name
+                FROM pinned_verses pv
+                JOIN pinned_groups pg ON pv.group_id = pg.id
+            """)
+            return [{
+                'id': row[0],
+                'surah': row[1],
+                'ayah': row[2],
+                'group_id': row[3],
+                'timestamp': row[4],
+                'group_name': row[5]
+            } for row in cursor.fetchall()]
