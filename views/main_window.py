@@ -28,7 +28,7 @@ from views.dialogs.notes_manager import NotesManagerDialog
 from views.dialogs.notes_dialog import NoteDialog
 from views.dialogs.data_transfer import DataTransferDialog
 from views.dialogs.help_dialog import HelpDialog
-#from views.dialogs.pinned_dialog import PinnedVersesDialog
+from views.dialogs.pinned_dialog import PinnedVersesDialog
 
 
 from PyQt5.QtWidgets import QInputDialog
@@ -44,6 +44,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.course_dialog = None
         self.bookmark_dialog = None
         self.notes_dialog = None
+        self.pinned_dialog = None
         self.compact_help_dialog = None
         self.current_detail_result = None
         self.current_view = None  # Will track {'type': 'surah'/'search', 'surah': x, 'method': y, 'query': z}
@@ -53,8 +54,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.message_timer = QtCore.QTimer()
         self.message_timer.timeout.connect(self.revert_status_message)
 
-        # self.pinned_dialog = PinnedVersesDialog(self)
-        # self.pinned_dialog.verse_selected.connect(self.load_and_show_ayah)
+
 
         self.highlight_action = None
         self.highlight_color = "#FFD700"  # Gold color for highlighting
@@ -69,8 +69,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
         self.db = DbManager()
 
-        self.pinned_verses = self.db.get_all_pinned_verses()
-
+        self.pinned_verses = self.db.get_active_pinned_verses()
 
         self.settings = AppSettings()
         self.theme_action = None
@@ -496,6 +495,17 @@ class QuranBrowser(QtWidgets.QMainWindow):
         except (ValueError, TypeError):
             return
             
+
+        # Get active group
+        active_group = next(
+            (g for g in self.db.get_pinned_groups() if g['active']), 
+            None
+        )
+        
+        if not active_group:
+            self.showMessage("No active group", 2000)
+            return
+
         # Check if already pinned
         key = (surah, ayah)
         found = False
@@ -510,7 +520,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 
         if not found:
             # Pin
-            if self.db.add_pinned_verse(surah, ayah):
+            if self.db.add_pinned_verse(surah, ayah, active_group['id']):
                 # Add minimal data to pinned verses
                 self.pinned_verses.append({
                     'surah': surah,
@@ -535,10 +545,19 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.search()
 
                 
-    # def show_pinned_dialog(self):
-    #     dialog = PinnedVersesDialog(self.pinned_verses, self.search_engine, self)
-    #     dialog.verseSelected.connect(self.load_and_show_ayah)
-    #     dialog.exec_()
+    def show_pinned_dialog(self):
+        if not self.pinned_dialog:
+            self.pinned_dialog = PinnedVersesDialog(self.db, self.search_engine, self)
+            self.pinned_dialog.verseSelected.connect(self.load_and_show_ayah)
+            # Connect the active group changed signal
+            self.pinned_dialog.activeGroupChanged.connect(self.handle_active_group_changed)
+        self.pinned_dialog.show()
+
+    def handle_active_group_changed(self):
+        """Refresh pinned verses when active group changes"""
+        self.pinned_verses = self.db.get_active_pinned_verses()
+        self.refresh_current_view()
+        self.showMessage("تم تحديث المجموعة النشطة", 2000)
 
 
     def setup_menu(self):
@@ -580,10 +599,10 @@ class QuranBrowser(QtWidgets.QMainWindow):
         course_action.triggered.connect(self.show_course_manager)
         menu.addAction(course_action)
 
-        # pinned_action = QtWidgets.QAction("Pinned Verses", self)
-        # pinned_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+O"))
-        # pinned_action.triggered.connect(self.show_pinned_dialog)
-        # menu.addAction(pinned_action)
+        pinned_action = QtWidgets.QAction("Pinned Verses", self)
+        pinned_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+O"))
+        pinned_action.triggered.connect(self.show_pinned_dialog)
+        menu.addAction(pinned_action)
 
 
         # Data Transfer (Ctrl+Shift+E)
@@ -710,6 +729,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.version_combo.setCurrentIndex(version_index)
         surah_index = self.settings.value("surahIndex", 0, type=int)
         self.surah_combo.setCurrentIndex(surah_index)
+        self.pinned_verses = self.db.get_active_pinned_verses()
+
 
     def closeEvent(self, event):
         self.settings.set("geometry", self.saveGeometry())

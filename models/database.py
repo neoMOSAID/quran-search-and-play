@@ -14,7 +14,6 @@ class DbManager:
         app_data_path.mkdir(parents=True, exist_ok=True)
         self.db_path = app_data_path / "quran_notes.db"
         self._init_db()
-        self._create_pinned_table()
 
     def _init_db(self):
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -46,6 +45,37 @@ class DbManager:
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_bookmarks ON bookmarks (timestamp)")
+            # Add pinned_groups table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS pinned_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    active BOOLEAN DEFAULT 0,
+                    created TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Modify pinned_verses table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS pinned_verses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    surah INTEGER NOT NULL,
+                    ayah INTEGER NOT NULL,
+                    group_id INTEGER NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(group_id) REFERENCES pinned_groups(id) ON DELETE CASCADE
+                )
+            """)
+            # enforce uniqueness (idempotent)
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_pinned_verses_surah_ayah_group
+                ON pinned_verses (surah, ayah, group_id)
+            """)
+            # Create default group if none exists
+            conn.execute("""
+                INSERT OR IGNORE INTO pinned_groups (name, active) 
+                VALUES ('Default', 1)
+            """)
 
     def get_notes(self, surah, ayah):
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -346,38 +376,60 @@ class DbManager:
             return cursor.fetchone()[0] > 0
 
     
-    def _create_pinned_table(self):
+    # Pinned verses ----------------------------------------------------
+    def is_pinned(self, surah, ayah, group_id=None):
+        """Check if a (surah, ayah) is pinned in given group or in active group if group_id is None."""
+        if group_id is None:
+            group_id = self.get_active_group_id()
+            if group_id is None:
+                return False
         with sqlite3.connect(str(self.db_path)) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS pinned_verses (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    surah INTEGER NOT NULL,
-                    ayah INTEGER NOT NULL,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(surah, ayah)
-                )
-            ''')
-            conn.commit()
-    
-    def add_pinned_verse(self, surah, ayah):
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM pinned_verses WHERE surah=? AND ayah=? AND group_id=?",
+                (surah, ayah, group_id)
+            )
+            return cursor.fetchone()[0] > 0
+
+    def add_pinned_verse(self, surah, ayah, group_id=None):
+        """
+        Add a pinned verse to a group. Returns True if added or already exists, False on error.
+        If group_id is None, use active group.
+        """
+        if group_id is None:
+            group_id = self.get_active_group_id()
+            if group_id is None:
+                return False
+
         with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
             try:
+                # Use INSERT OR IGNORE to be idempotent; unique index enforces uniqueness.
                 conn.execute(
-                    "INSERT OR IGNORE INTO pinned_verses (surah, ayah) VALUES (?, ?)",
-                    (surah, ayah)
+                    "INSERT OR IGNORE INTO pinned_verses (surah, ayah, group_id) VALUES (?, ?, ?)",
+                    (surah, ayah, group_id)
                 )
                 conn.commit()
-                return True
+                # Return True if row exists now
+                return self.is_pinned(surah, ayah, group_id)
             except sqlite3.Error as e:
                 print(f"Error adding pinned verse: {e}")
                 return False
         
-    def remove_pinned_verse(self, surah, ayah):
+    def remove_pinned_verse(self, surah, ayah, group_id=None):
+        """
+        Remove a pinned verse from a group. If group_id is None, remove from active group.
+        Returns True on success (even if row didn't exist), False on DB error.
+        """
+        if group_id is None:
+            group_id = self.get_active_group_id()
+            if group_id is None:
+                return False
         with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
             try:
                 conn.execute(
-                    "DELETE FROM pinned_verses WHERE surah=? AND ayah=?",
-                    (surah, ayah)
+                    "DELETE FROM pinned_verses WHERE surah=? AND ayah=? AND group_id=?",
+                    (surah, ayah, group_id)
                 )
                 conn.commit()
                 return True
@@ -385,17 +437,94 @@ class DbManager:
                 print(f"Error removing pinned verse: {e}")
                 return False
     
-    def get_all_pinned_verses(self):
+    # Add to DbManager class
+    def create_pinned_group(self, name):
         with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
             try:
                 cursor = conn.execute(
-                    "SELECT surah, ayah, timestamp FROM pinned_verses ORDER BY timestamp DESC"
+                    "INSERT INTO pinned_groups (name) VALUES (?)",
+                    (name,)
                 )
-                return [{
-                    'surah': row[0],
-                    'ayah': row[1],
-                    'timestamp': row[2]
-                } for row in cursor]
-            except sqlite3.Error as e:
-                print(f"Error getting pinned verses: {e}")
-                return []
+                return cursor.lastrowid
+            except sqlite3.IntegrityError:
+                return None
+
+    def delete_pinned_group(self, group_id):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute(
+                "DELETE FROM pinned_groups WHERE id = ?",
+                (group_id,)
+            )
+            
+    def rename_pinned_group(self, group_id, new_name):
+        """Rename a pinned group"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            try:
+                conn.execute(
+                    "UPDATE pinned_groups SET name = ? WHERE id = ?",
+                    (new_name, group_id)
+                )
+                return True
+            except sqlite3.IntegrityError:
+                # Name already exists
+                return False
+
+    def get_pinned_groups(self):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute(
+                "SELECT id, name, active FROM pinned_groups ORDER BY created DESC"
+            )
+            return [{
+                'id': row[0],
+                'name': row[1],
+                'active': bool(row[2])
+            } for row in cursor]
+
+    def set_active_group(self, group_id):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            # Deactivate all groups
+            conn.execute("UPDATE pinned_groups SET active = 0")
+            # Activate selected group
+            conn.execute(
+                "UPDATE pinned_groups SET active = 1 WHERE id = ?",
+                (group_id,)
+            )
+
+    def get_active_group_id(self):
+        """Return active group id or None"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("SELECT id FROM pinned_groups WHERE active = 1 LIMIT 1")
+            row = cursor.fetchone()
+            return row[0] if row else None
+
+    def get_active_pinned_verses(self):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT pv.surah, pv.ayah, pv.timestamp
+                FROM pinned_verses pv
+                JOIN pinned_groups pg ON pv.group_id = pg.id
+                WHERE pg.active = 1
+                ORDER BY pv.timestamp DESC
+            """)
+            return [{
+                'surah': row[0],
+                'ayah': row[1],
+                'timestamp': row[2]
+            } for row in cursor]
+
+    # Add to DbManager
+    def get_pinned_verses_by_group(self, group_id):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT surah, ayah, timestamp 
+                FROM pinned_verses 
+                WHERE group_id = ?
+                ORDER BY timestamp DESC
+            """, (group_id,))
+            return [{
+                'surah': row[0],
+                'ayah': row[1],
+                'timestamp': row[2]
+            } for row in cursor]
