@@ -46,8 +46,17 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
             for v in self.parent().window().pinned_verses
         )
 
-        # Draw pinned background (only if not selected)
-        if is_pinned and not (option.state & QtWidgets.QStyle.State_Selected):
+        # Draw background based on selection and pinned status
+        if option.state & QtWidgets.QStyle.State_Selected:
+            # Selected item background
+            if is_pinned:
+                # Blend pinned color with selection color
+                blend_color = QtGui.QColor("#4A4A2A" if self.is_dark else "#9B8F3D")
+                painter.fillRect(option.rect, blend_color)
+            else:
+                painter.fillRect(option.rect, option.palette.highlight())
+        elif is_pinned:
+            # Pinned but not selected
             bg_color = QtGui.QColor("#3b3b1f" if self.is_dark else "#F0E68C")
             painter.fillRect(option.rect, bg_color)
 
@@ -62,12 +71,15 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         doc.setDefaultTextOption(text_option)
         doc.setTextWidth(option.rect.width() - 20)
 
+        # Set text color for selected items
         if option.state & QtWidgets.QStyle.State_Selected:
-            painter.fillRect(option.rect, option.palette.highlight())
+            text_color = option.palette.highlightedText().color()
+            doc.setDefaultStyleSheet(f"body {{ color: {text_color.name()}; }}")
 
         painter.translate(option.rect.topLeft())
         doc.drawContents(painter)
         painter.restore()
+
 
     def _format_text(self, result, version):
         text = result.get(f"text_{version}", "")
@@ -81,12 +93,6 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         # Indicator icon
         pin_indicator = """<span style="color: goldenrod;">&#9733;</span> """ if is_pinned else ""
 
-        # Background color depending on theme
-        pinned_bg = "#3b3b1f" if self.is_dark else "#F0E68C"  # Dark: olive-brown / Light: cornsilk
-        normal_bg = "transparent"
-
-        bg_color = pinned_bg if is_pinned else normal_bg
-        
         # Apply highlighting if enabled
         main_window = self.parent().window()
         if hasattr(main_window, 'highlight_action') and main_window.highlight_action.isChecked():
@@ -104,7 +110,7 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
                     )
 
         return f"""
-        <div dir="rtl" style="text-align:left; background-color: {bg_color}; width:100%; margin:0; padding:10px;">
+        <div dir="rtl" style="text-align:left; width:100%; margin:0; padding:10px;">
             <div style="font-family: 'Amiri';
                         font-size: {self.base_font_size}pt;
                         margin: 5px;">

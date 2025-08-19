@@ -1578,7 +1578,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
                     # Add verses with individual ayah numbers
                     for v in verses:
                         v_text = strip_html_tags(v['text_uthmani'])
-                        text += f"{v_text} •  "
+                        text += f"{v_text} ({v['ayah']})•  "
                     text +=f" ({chapter_name} {range_info})"
                     output.append(text)
             elif item_type == 'search':

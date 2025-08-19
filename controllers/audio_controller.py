@@ -51,11 +51,18 @@ class AudioController:
                 QTimer.singleShot(100, self.play_next_file)
 
     def stop_playback(self):
-        """Stop any current audio playback."""
-        self.repeat_all = False
+        """Stop any current audio playback and reset player state"""
         self.player.stop()
         self.player.setMedia(QMediaContent())  # Clear current media
-        self.parent.showMessage("Playback stopped", 2000)
+        self.repeat_all = False
+        self.playing_one = False
+        self.playing_context = 0
+        self.playing_range = 0
+        self.repeat_count = 0
+        self.max_repeats = 0
+        self.playing_range_max = 0
+        self.playing_ayah_range = False
+        self.playing_basmalah = False
 
     def play_current(self, surah=None, ayah=None, count=1):
         """
@@ -387,6 +394,19 @@ class AudioController:
         if chosen_dir:
             self.parent.settings.set("AudioDirectory", chosen_dir)
             self.parent.showMessage(f"Audio directory set to: {chosen_dir}", 3000)
+            
+            # Stop any current playback and reset player state
+            self.stop_playback()
+            self.reset_player_state()
+
+    def reset_player_state(self):
+        """Reset all player state variables"""
+        self.sequence_files = []
+        self.current_sequence_index = 0
+        self.current_surah = 0
+        self.current_start_ayah = 0
+        self.pending_sequence_index = 0
+
 
     def load_surah_from_current_playback(self):
         """

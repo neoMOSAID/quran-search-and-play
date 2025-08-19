@@ -290,7 +290,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
 
     def copy_selected_results(self):
-        """Copy selected results to clipboard with verse references"""
+        """Copy selected results to clipboard with verse references, grouping consecutive verses"""
         selected = self.results_view.selectionModel().selectedIndexes()
         
         if not selected:
@@ -300,23 +300,76 @@ class QuranBrowser(QtWidgets.QMainWindow):
         version = self.get_current_version()
         text_list = []
         
+        # Sort selected verses by surah and ayah
+        verses = []
         for index in selected:
             result = self.model.data(index, QtCore.Qt.UserRole)
             if result:
-                # Remove span tags
-                raw_text = result.get(f'text_{version}', '')
-                clean_text = re.sub(r'<span[^>]*>|</span>', '', raw_text)
+                try:
+                    surah = int(result.get('surah', 0))
+                    ayah = int(result.get('ayah', 0))
+                    # Remove span tags
+                    raw_text = result.get(f'text_{version}', '')
+                    clean_text = re.sub(r'<span[^>]*>|</span>', '', raw_text)
+                    
+                    verses.append({
+                        'surah': surah,
+                        'ayah': ayah,
+                        'text': clean_text,
+                        'chapter': self.search_engine.get_chapter_name(surah)
+                    })
+                except (ValueError, TypeError):
+                    continue
+        
+        # Sort by surah then ayah
+        verses.sort(key=lambda x: (x['surah'], x['ayah']))
+        
+        # Group consecutive verses from same surah
+        grouped_verses = []
+        current_group = []
+        
+        for verse in verses:
+            if not current_group:
+                current_group.append(verse)
+            else:
+                last_verse = current_group[-1]
+                # Check if same surah and consecutive ayah
+                if (verse['surah'] == last_verse['surah'] and 
+                    verse['ayah'] == last_verse['ayah'] + 1):
+                    current_group.append(verse)
+                else:
+                    grouped_verses.append(current_group)
+                    current_group = [verse]
+        
+        if current_group:
+            grouped_verses.append(current_group)
+        
+        # Format the output
+        for group in grouped_verses:
+            if len(group) == 1:
+                # Single verse
+                verse = group[0]
+                text_list.append(f"{verse['text']} ({verse['chapter']} {verse['ayah']})")
+            else:
+                # Group of consecutive verses
+                texts = [f"{v['text']} ({v['ayah']})• " for v in group]
+                combined_text = " ".join(texts)
                 
-                surah_num = result.get('surah', '')
-                ayah = result.get('ayah', '')
-                chapter = self.search_engine.get_chapter_name(surah_num)
-                text_list.append(f"{clean_text} ({chapter} {ayah})")
+                first_ayah = group[0]['ayah']
+                last_ayah = group[-1]['ayah']
+                chapter = group[0]['chapter']
+                
+                if first_ayah == last_ayah:
+                    ref = f"{chapter} {first_ayah}"
+                else:
+                    ref = f"{chapter} الآيات {first_ayah}-{last_ayah}"
+                
+                text_list.append(f"{combined_text} ({ref})")
 
         full_text = "\n".join(text_list)
         clipboard = QtWidgets.QApplication.clipboard()
         clipboard.setText(full_text)
         self.showMessage(f"Copied {len(selected)} selected verses", 3000)
-
 
 
     def copy_all_results(self):
@@ -936,7 +989,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.model.loading_complete.connect(self.finalize_results)
 
     def finalize_results(self):
-        self.results_count_int = len(self.model.results)
+        self.results_count_int = len(self.model.results) - len(self.pinned_verses)
         self.model.loading_complete.disconnect()  # Clean up connection
 
     def update_results(self, results, query=None):
@@ -962,7 +1015,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             
         # Update model with combined results
         self.model.updateResults(combined_results)
-        self.results_count_int = len(combined_results)
+        self.results_count_int = len(combined_results) - len(self.pinned_verses)
         
         # Set status message
         if query and "Surah" in query:
