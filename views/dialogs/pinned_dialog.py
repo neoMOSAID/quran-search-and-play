@@ -4,6 +4,7 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 class PinnedVersesDialog(QtWidgets.QDialog):
     verseSelected = QtCore.pyqtSignal(int, int)  # surah, ayah
     activeGroupChanged = QtCore.pyqtSignal()
+    
     def __init__(self, db, search_engine, parent=None):
         super().__init__(parent)
         self.db = db
@@ -11,6 +12,9 @@ class PinnedVersesDialog(QtWidgets.QDialog):
         self.setWindowTitle("الآيات المثبتة - المجموعات")
         self.resize(900, 600)
         self.init_ui()
+        self.current_group_id = None
+        self.verse_items = []  # To store verse items for reordering
+        self.pending_changes = []  # Track changes before saving
         self.load_groups()
         
     def init_ui(self):
@@ -44,14 +48,12 @@ class PinnedVersesDialog(QtWidgets.QDialog):
         self.new_btn = QtWidgets.QPushButton("جديد")
         self.new_btn.setFont(QtGui.QFont("Amiri", 12))
         self.new_btn.setMinimumHeight(40)
-        #self.new_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; }")
         self.new_btn.clicked.connect(self.new_group)
         group_btn_layout.addWidget(self.new_btn)
         
         self.delete_btn = QtWidgets.QPushButton("حذف")
         self.delete_btn.setFont(QtGui.QFont("Amiri", 12))
         self.delete_btn.setMinimumHeight(40)
-        #self.delete_btn.setStyleSheet("QPushButton { background-color: #f44336; color: white; }")
         self.delete_btn.clicked.connect(self.delete_group)
         group_btn_layout.addWidget(self.delete_btn)
         group_layout.addLayout(group_btn_layout)
@@ -82,13 +84,35 @@ class PinnedVersesDialog(QtWidgets.QDialog):
         self.verse_list.doubleClicked.connect(self.on_verse_double_clicked)
         verse_layout.addWidget(self.verse_list)
         
-        # Remove verse button
+        # Action buttons for verses
+        action_layout = QtWidgets.QHBoxLayout()
+        
         self.remove_verse_btn = QtWidgets.QPushButton("إزالة الآية المحددة")
         self.remove_verse_btn.setFont(QtGui.QFont("Amiri", 12))
         self.remove_verse_btn.setMinimumHeight(40)
-        #self.remove_verse_btn.setStyleSheet("QPushButton { background-color: #ff9800; color: white; }")
         self.remove_verse_btn.clicked.connect(self.remove_selected_verse)
-        verse_layout.addWidget(self.remove_verse_btn)
+        action_layout.addWidget(self.remove_verse_btn)
+        
+        self.move_up_btn = QtWidgets.QPushButton("Move Up")
+        self.move_up_btn.setFont(QtGui.QFont("Amiri", 12))
+        self.move_up_btn.setMinimumHeight(40)
+        self.move_up_btn.clicked.connect(self.move_verse_up)
+        action_layout.addWidget(self.move_up_btn)
+        
+        self.move_down_btn = QtWidgets.QPushButton("Move Down")
+        self.move_down_btn.setFont(QtGui.QFont("Amiri", 12))
+        self.move_down_btn.setMinimumHeight(40)
+        self.move_down_btn.clicked.connect(self.move_verse_down)
+        action_layout.addWidget(self.move_down_btn)
+        
+        self.save_btn = QtWidgets.QPushButton("Save Changes")
+        self.save_btn.setFont(QtGui.QFont("Amiri", 12))
+        self.save_btn.setMinimumHeight(40)
+        #self.save_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; }")
+        self.save_btn.clicked.connect(self.save_changes)
+        action_layout.addWidget(self.save_btn)
+        
+        verse_layout.addLayout(action_layout)
         
         splitter.addWidget(verse_frame)
         
@@ -101,20 +125,11 @@ class PinnedVersesDialog(QtWidgets.QDialog):
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
         )
         btn_box.setFont(QtGui.QFont("Amiri", 12))
-
-        # Force button order: OK right, Cancel left
         btn_box.setLayoutDirection(QtCore.Qt.LeftToRight)
-
-        # Keep dialog RTL for labels
         self.setLayoutDirection(QtCore.Qt.RightToLeft)
-
         btn_box.accepted.connect(self.accept)
         btn_box.rejected.connect(self.reject)
-
         main_layout.addWidget(btn_box)
-        
-        # Set RTL layout direction
-        self.setLayoutDirection(QtCore.Qt.RightToLeft)
         
     def load_groups(self):
         self.group_list.clear()
@@ -144,19 +159,19 @@ class PinnedVersesDialog(QtWidgets.QDialog):
                     self.group_list.setCurrentItem(item)
                     break
     
-    
     def group_selected(self):
         selected_items = self.group_list.selectedItems()
         if not selected_items:
             return
             
-        group_id = selected_items[0].data(QtCore.Qt.UserRole)
-        self.load_verses(group_id)
+        self.current_group_id = selected_items[0].data(QtCore.Qt.UserRole)
+        self.load_verses(self.current_group_id)
+        self.pending_changes = []  # Reset pending changes when switching groups
         
-    
     def load_verses(self, group_id):
         self.verse_list.clear()
-        verses = self.db.get_pinned_verses_by_group(group_id)
+        self.verse_items = []
+        verses = self.db.get_pinned_verses_by_group_ordered(group_id)
         
         for verse in verses:
             surah_name = self.search_engine.get_chapter_name(verse['surah'])
@@ -168,6 +183,7 @@ class PinnedVersesDialog(QtWidgets.QDialog):
             item = QtWidgets.QListWidgetItem(display_text)
             item.setData(QtCore.Qt.UserRole, verse)
             self.verse_list.addItem(item)
+            self.verse_items.append((verse['surah'], verse['ayah']))
     
     def new_group(self):
         name, ok = QtWidgets.QInputDialog.getText(
@@ -223,7 +239,6 @@ class PinnedVersesDialog(QtWidgets.QDialog):
 
     def showMessage(self, message, timeout=3000):
         """Show a temporary message in the status bar"""
-        # We don't have a status bar, so show a QMessageBox
         msg = QtWidgets.QMessageBox(self)
         msg.setWindowTitle(" ")
         msg.setText(message)
@@ -242,17 +257,77 @@ class PinnedVersesDialog(QtWidgets.QDialog):
         
         # Collect verses to remove
         verses_to_remove = []
+        rows_to_remove = []
         for item in selected_items:
             verse = item.data(QtCore.Qt.UserRole)
             verses_to_remove.append(verse)
+            rows_to_remove.append(self.verse_list.row(item))
         
-        # Remove from database
+        # Add to pending changes instead of immediate database operation
         for verse in verses_to_remove:
-            self.db.remove_pinned_verse(verse['surah'], verse['ayah'], group_id)
+            self.pending_changes.append(('remove', verse['surah'], verse['ayah'], group_id))
         
-        # Reload verses
-        self.load_verses(group_id)
+        # Remove from list widget (in reverse order to avoid index issues)
+        for row in sorted(rows_to_remove, reverse=True):
+            self.verse_list.takeItem(row)
+            if row < len(self.verse_items):
+                self.verse_items.pop(row)
     
     def on_verse_double_clicked(self, item):
         verse = item.data(QtCore.Qt.UserRole)
         self.verseSelected.emit(verse['surah'], verse['ayah'])
+
+    def move_verse_up(self):
+        current_row = self.verse_list.currentRow()
+        if current_row <= 0:
+            return
+            
+        # Swap items in the list
+        item = self.verse_list.takeItem(current_row)
+        self.verse_list.insertItem(current_row - 1, item)
+        self.verse_list.setCurrentRow(current_row - 1)
+        
+        # Update the internal order tracking
+        self.verse_items.insert(current_row - 1, self.verse_items.pop(current_row))
+        
+        # Add to pending changes
+        self.pending_changes.append(('reorder', self.current_group_id, self.verse_items.copy()))
+        
+    def move_verse_down(self):
+        current_row = self.verse_list.currentRow()
+        if current_row < 0 or current_row >= self.verse_list.count() - 1:
+            return
+            
+        # Swap items in the list
+        item = self.verse_list.takeItem(current_row)
+        self.verse_list.insertItem(current_row + 1, item)
+        self.verse_list.setCurrentRow(current_row + 1)
+        
+        # Update the internal order tracking
+        self.verse_items.insert(current_row + 1, self.verse_items.pop(current_row))
+        
+        # Add to pending changes
+        self.pending_changes.append(('reorder', self.current_group_id, self.verse_items.copy()))
+
+    def save_changes(self):
+        """Apply all pending changes to the database"""
+        if not self.pending_changes:
+            self.showMessage("لا توجد تغييرات لحفظها", 2000)
+            return
+            
+        try:
+            # Process all pending changes
+            for change in self.pending_changes:
+                if change[0] == 'remove':
+                    _, surah, ayah, group_id = change
+                    self.db.remove_pinned_verse(surah, ayah, group_id)
+                elif change[0] == 'reorder':
+                    _, group_id, new_order = change
+                    self.db.reorder_pinned_verses(group_id, new_order)
+            
+            # Clear pending changes after successful save
+            self.pending_changes = []
+            self.showMessage("تم حفظ التغييرات بنجاح", 2000)
+            
+        except Exception as e:
+            self.showMessage(f"خطأ في حفظ التغييرات: {str(e)}", 3000)

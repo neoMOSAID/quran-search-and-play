@@ -245,7 +245,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.app_settings = AppSettings() 
         self.current_course = None
         self.loading = False
-        self.preview_was_visible = False
+        #self.preview_was_visible = False
         self.unsaved_changes = False
         self.original_title = ""
         self.auto_save_timer = QtCore.QTimer()
@@ -299,16 +299,6 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 50000
             )
 
-    # def log_edit_session(self):
-    #     """Log edit session start to recovery file"""
-    #     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    #     try:
-    #         with open(self.recovery_file, "w", encoding="utf-8") as f:
-    #             f.write(f"# Edit session started at {timestamp}\n")
-    #             f.write(self.original_note_content)
-    #     except Exception as e:
-    #         logging.error(f"Error creating recovery file: {str(e)}")
-
     def clear_recovery_file(self):
         """Clear the recovery file"""
         try:
@@ -316,29 +306,6 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 os.remove(self.recovery_file)
         except Exception as e:
             logging.error(f"Error removing recovery file: {str(e)}")
-
-    # def save_current_note(self):
-    #     """Save current note and exit edit mode"""
-    #     if not self.current_editing_index.isValid():
-    #         return
-            
-    #     item = self.model.itemFromIndex(self.current_editing_index)
-    #     data = item.data(QtCore.Qt.UserRole)
-    #     new_content = self.preview_edit.toPlainText()
-        
-    #     # Update data
-    #     data['user_data']['content'] = new_content
-    #     item.setData(data, QtCore.Qt.UserRole)
-        
-    #     # Update display
-    #     preview = new_content.split('\n')[0][:30] + ('...' if len(new_content) > 30 else '')
-    #     item.setText(f"Note: {preview}")
-        
-    #     # Exit edit mode
-    #     self.end_editing()
-        
-    #     # Clear recovery file
-    #     self.clear_recovery_file()
 
 
     def cancel_editing(self):
@@ -375,76 +342,6 @@ class CourseManagerDialog(QtWidgets.QDialog):
             self.current_editing_index = None
         self.list_view.setFocus()
 
-    # def revert_to_version(self):
-    #     """Revert to previous version"""
-    #     if not self.edit_mode or len(self.note_versions) < 2:
-    #         return
-            
-    #     # Get the previous version
-    #     prev_version = self.note_versions[self.current_version - 1]
-        
-    #     # Update the editor and model
-    #     self.preview_edit.setPlainText(prev_version)
-    #     self.status_bar.showMessage(f"Reverted to previous version", 3000)
-        
-    #     # Update the current version pointer
-    #     self.current_version -= 1
-    #     if self.current_version < 0:
-    #         self.current_version = 0
-            
-    #     # Update the model
-    #     item = self.model.itemFromIndex(self.current_editing_index)
-    #     data = item.data(QtCore.Qt.UserRole)
-    #     data['user_data']['content'] = prev_version
-    #     item.setData(data, QtCore.Qt.UserRole)
-        
-    #     # Update display text
-    #     preview = prev_version.split('\n')[0][:30] + ('...' if len(prev_version) > 30 else '')
-    #     item.setText(f"Note: {preview}")
-    #     self.mark_unsaved()
-
-    # def show_version_history(self):
-    #     """Show dialog with all saved versions"""
-    #     if not self.edit_mode or len(self.note_versions) < 2:
-    #         return
-            
-    #     dialog = QtWidgets.QDialog(self)
-    #     dialog.setWindowTitle("Note Version History")
-    #     layout = QtWidgets.QVBoxLayout()
-        
-    #     list_widget = QtWidgets.QListWidget()
-    #     for i, version in enumerate(reversed(self.note_versions)):
-    #         preview = version.split('\n')[0][:50] + ('...' if len(version) > 50 else '')
-    #         item = QtWidgets.QListWidgetItem(f"Version {len(self.note_versions)-i}: {preview}")
-    #         item.setData(QtCore.Qt.UserRole, version)
-    #         list_widget.addItem(item)
-        
-    #     button_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
-    #     button_box.accepted.connect(dialog.accept)
-    #     button_box.rejected.connect(dialog.reject)
-        
-    #     layout.addWidget(QtWidgets.QLabel("Select a version to restore:"))
-    #     layout.addWidget(list_widget)
-    #     layout.addWidget(button_box)
-    #     dialog.setLayout(layout)
-        
-    #     if dialog.exec_() == QtWidgets.QDialog.Accepted:
-    #         selected = list_widget.currentItem()
-    #         if selected:
-    #             version_content = selected.data(QtCore.Qt.UserRole)
-    #             self.preview_edit.setPlainText(version_content)
-                
-    #             # Update model
-    #             item = self.model.itemFromIndex(self.current_editing_index)
-    #             data = item.data(QtCore.Qt.UserRole)
-    #             data['user_data']['content'] = version_content
-    #             item.setData(data, QtCore.Qt.UserRole)
-                
-    #             # Update display text
-    #             preview = version_content.split('\n')[0][:30] + ('...' if len(version_content) > 30 else '')
-    #             item.setText(f"Note: {preview}")
-    #             self.mark_unsaved()
-
     def handle_model_changed(self, *args):
         """Only mark changes if not loading"""
         #print(f"Model changed signal received with args: {args}")
@@ -462,26 +359,10 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.resize(800, 600)
         layout = QtWidgets.QVBoxLayout()
 
-        # Header
-        # Replace title_edit with a combo box
+        # Header - Course selection
         self.course_combo = QtWidgets.QComboBox()
-        self.course_combo.setEditable(True)  # Allow editing the title
-        self.course_combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)  # Don't add new items on edit
-        self.course_combo.setMinimumWidth(200)  # Make it wider
-        
-        # Create a custom delegate to handle double-click
-        class ComboDelegate(QtWidgets.QStyledItemDelegate):
-            def __init__(self, parent):
-                super().__init__(parent)
-                
-            def editorEvent(self, event, model, option, index):
-                # Open dropdown on double-click
-                if event.type() == QtCore.QEvent.MouseButtonDblClick:
-                    self.parent().showPopup()
-                    return True
-                return super().editorEvent(event, model, option, index)
-        
-        self.course_combo.setItemDelegate(ComboDelegate(self.course_combo))
+        self.course_combo.setEditable(False)
+        self.course_combo.setMinimumWidth(200)
 
         self.prev_btn = QtWidgets.QPushButton("←")
         self.next_btn = QtWidgets.QPushButton("→")
@@ -497,6 +378,17 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.next_btn.setFixedSize(25, 25)
 
         layout.addLayout(nav_layout)
+
+        # Create a container for the left side of the splitter
+        left_widget = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Add title edit to the left panel (above the list view)
+        self.title_edit = QtWidgets.QLineEdit()
+        self.title_edit.setPlaceholderText("Course Title")
+        self.title_edit.textChanged.connect(self.handle_title_changed)
+        left_layout.addWidget(self.title_edit)
 
         # List View
         self.list_view = QtWidgets.QListView()
@@ -527,6 +419,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 color: white;
             }
         """)
+        
         # Add dark mode variant
         if self.main_window and self.main_window.theme_action.isChecked():
             self.list_view.setStyleSheet("""
@@ -547,7 +440,9 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 }
             """)
 
+        left_layout.addWidget(self.list_view)
 
+        # Preview Edit
         self.preview_edit = QtWidgets.QTextEdit()
         self.preview_edit.setReadOnly(True)
         self.preview_edit.setStyleSheet("""
@@ -558,12 +453,13 @@ class CourseManagerDialog(QtWidgets.QDialog):
             }
         """)
 
+        # Splitter
         self.splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        self.splitter.addWidget(self.list_view)
+        self.splitter.addWidget(left_widget)  # Add the left container instead of just list_view
         self.splitter.addWidget(self.preview_edit)
-        self.splitter.setSizes([int(self.width()*0.3), int(self.width()*0.7)])
+        self.splitter.setSizes([int(self.width()*0.25), int(self.width()*0.75)])  # Adjusted ratio
         self.splitter.setStretchFactor(0, 1)
-        self.splitter.setStretchFactor(1, 3)
+        self.splitter.setStretchFactor(1, 2)
 
         layout.addWidget(self.splitter)
 
@@ -695,47 +591,20 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.setLayout(layout)
 
 
-    # def showEvent(self, event):
-    #     """Check for recovery file on show"""
-    #     super().showEvent(event)
-    #     self.check_recovery_file()
-
-    # def check_recovery_file(self):
-    #     """Check for recovery file and prompt user"""
-    #     if os.path.exists(self.recovery_file):
-    #         reply = QtWidgets.QMessageBox.question(
-    #             self,
-    #             'Recover Note',
-    #             'A recovered note edit session was found. Would you like to recover it?',
-    #             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
-    #         )
-            
-    #         if reply == QtWidgets.QMessageBox.Yes:
-    #             try:
-    #                 with open(self.recovery_file, "r", encoding="utf-8") as f:
-    #                     content = f.read()
-    #                     # Skip header line
-    #                     if content.startswith("#"):
-    #                         content = "\n".join(content.split("\n")[1:])
-    #                     self.recovered_content = content
-                        
-    #                     # Find the first note item
-    #                     for row in range(self.model.rowCount()):
-    #                         index = self.model.index(row, 0)
-    #                         item = self.model.itemFromIndex(index)
-    #                         data = item.data(QtCore.Qt.UserRole)
-    #                         if data.get('type') == 'note':
-    #                             self.list_view.setCurrentIndex(index)
-    #                             self.start_editing()
-    #                             self.preview_edit.setPlainText(content)
-    #                             break
-    #             except Exception as e:
-    #                 logging.error(f"Error loading recovery file: {str(e)}")
-            
-    #         # Clear recovery file regardless of choice
-    #         #self.clear_recovery_file()
-
-
+    def showEvent(self, event):
+        """Ensure dropdown appears correctly"""
+        super().showEvent(event)
+        # Ensure the combo box dropdown appears within the dialog
+        self.course_combo.setMaxVisibleItems(10)
+        self.course_combo.setStyleSheet("""
+            QComboBox {
+                combobox-popup: 0;
+            }
+            QComboBox QAbstractItemView {
+                max-height: 300px;
+            }
+        """)
+        
     def load_initial_courses(self):
         """Load first course or create new one"""
         if self.db.has_any_courses():
@@ -868,7 +737,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
             
             # print(f"Model row count after load: {self.model.rowCount()}")
             # print(f"Current course item count: {len(self.current_course['items'])}")
-                        
+            self.title_edit.setText(self.current_course['title'])
             self.update_window_title()
  
         finally:
@@ -878,6 +747,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
             self.model.blockSignals(False)
             self.loading = False  # Clear loading flag
             QtCore.QTimer.singleShot(100, self.clear_initial_changes)
+            QtCore.QTimer.singleShot(50, self.force_list_view_refresh)
 
 
             # print(f"After load - unsaved_changes: {self.unsaved_changes}")
@@ -886,6 +756,12 @@ class CourseManagerDialog(QtWidgets.QDialog):
             # print(f"Title changed: {self.title_edit.text() != self.original_title}")
             # print(f"Model row count changed: {self.model.rowCount() != len(self.current_course['items'])}")
             # print("-" * 50)
+
+    # Add this new method
+    def force_list_view_refresh(self):
+        """Force the list view to refresh its display"""
+        self.list_view.reset()
+        self.list_view.viewport().update()
 
     def clear_initial_changes(self):
         """Clear any false unsaved states caused by initial rendering"""
@@ -928,48 +804,6 @@ class CourseManagerDialog(QtWidgets.QDialog):
                 return True
                 
         return False
-
-    # def load_course(self, course_id):
-    #     """Load a course by ID with proper unsaved state handling"""
-    #     if not course_id:
-    #         return
-        
-    #     # Store previous title to compare later
-    #     previous_title = self.title_edit.text()
-        
-    #     # Fetch course data
-    #     self.current_course = self.db.get_course(course_id)
-    #     if not self.current_course:
-    #         return
-        
-    #     try:
-    #         # Block signals while loading
-    #         self.title_edit.blockSignals(True)
-    #         self.model.blockSignals(True)
-            
-    #         # Set title first without triggering changes
-    #         new_title = self.current_course['title']
-    #         self.original_title = new_title
-    #         self.title_edit.setText(new_title)
-            
-    #         # Clear and reload items
-    #         self.model.clear()
-    #         for item in self.current_course['items']:
-    #             list_item = QtGui.QStandardItem(item.get('text', ''))
-    #             list_item.setData(item, QtCore.Qt.UserRole)
-    #             self.model.appendRow(list_item)
-                
-    #         # Reset state after load
-    #         self.unsaved_changes = False
-    #         self.update_window_title()
-            
-    #     finally:
-    #         # Restore signal handling
-    #         self.title_edit.blockSignals(False)
-    #         self.model.blockSignals(False)
-        
-    #     self.update_navigation_buttons()
-    #     self.list_view.setFocus()   
 
     def _add_item_to_model(self, item):
         list_item = QtGui.QStandardItem()
@@ -1047,7 +881,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
             items.append(item)
         
         # Get title from combo box
-        course_title = self.course_combo.currentText()
+        course_title = self.title_edit.text()
         
         if self.current_course:
             course_id = self.current_course['id']
@@ -1116,13 +950,12 @@ class CourseManagerDialog(QtWidgets.QDialog):
                     #self.resize(250, 350) 
 
     def handle_title_changed(self, text):
-        #print(f"Title changed: '{self.original_title}' -> '{text}'")
         if not self.loading and text != self.original_title:
             self.mark_unsaved()
 
     def update_window_title(self):
         title = "Course Manager"
-        current_title = self.course_combo.currentText()
+        current_title = self.title_edit.text() 
         if current_title:
             title += f" - {current_title}"
         if self.unsaved_changes:
@@ -1166,11 +999,16 @@ class CourseManagerDialog(QtWidgets.QDialog):
                         self.play_requested.emit(surah, start, end) 
 
                 elif data['type'] == 'search':
-                    idx = self.parent().search_method_combo.findText("Text", QtCore.Qt.MatchFixedString)
-                    if idx >= 0:
-                        self.parent().search_method_combo.setCurrentIndex(idx)
-                    self.search_requested.emit(data['query'])
-                
+                    query = data.get('query') or data.get('user_data', {}).get('query')
+                    if query:
+                        # Set search method to text
+                        idx = self.parent().search_method_combo.findText("Text", QtCore.Qt.MatchFixedString)
+                        if idx >= 0:
+                            self.parent().search_method_combo.setCurrentIndex(idx)
+                        # Set the query and search
+                        self.parent().search_input.setText(query)
+                        self.parent().search()
+                                
                 elif data.get('type') == 'note' and not self.edit_mode:
                     self.start_editing()
                     return
@@ -1189,7 +1027,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
             return
 
         # Store previous visibility state
-        self.preview_was_visible = self.preview_edit.isVisible()
+        #self.preview_was_visible = self.preview_edit.isVisible()
            
         data = item.data(QtCore.Qt.UserRole)
         item_type = data.get('data') or data.get('user_data')
@@ -1574,12 +1412,12 @@ class CourseManagerDialog(QtWidgets.QDialog):
                     chapter_name = search_engine.get_chapter_name(surah)
                     range_info = f"آية {start}" if start == end else f"الآيات {start}-{end}"
                     # Add star header
-                    text = "★ "
+                    text = "★ ﴿"
                     # Add verses with individual ayah numbers
                     for v in verses:
                         v_text = strip_html_tags(v['text_uthmani'])
                         text += f"{v_text} ({v['ayah']})•  "
-                    text +=f" ({chapter_name} {range_info})"
+                    text +=f"﴾ ({chapter_name} {range_info})"
                     output.append(text)
             elif item_type == 'search':
                 query = item.get('query', '')

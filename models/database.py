@@ -62,10 +62,18 @@ class DbManager:
                     surah INTEGER NOT NULL,
                     ayah INTEGER NOT NULL,
                     group_id INTEGER NOT NULL,
+                    position INTEGER DEFAULT 0,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY(group_id) REFERENCES pinned_groups(id) ON DELETE CASCADE
                 )
             """)
+            
+            # Check if position column exists, if not add it
+            cursor = conn.execute("PRAGMA table_info(pinned_verses)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if 'position' not in columns:
+                conn.execute("ALTER TABLE pinned_verses ADD COLUMN position INTEGER DEFAULT 0")
+                
             # enforce uniqueness (idempotent)
             conn.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS ux_pinned_verses_surah_ayah_group
@@ -563,4 +571,55 @@ class DbManager:
                 'group_id': row[3],
                 'timestamp': row[4],
                 'group_name': row[5]
+            } for row in cursor.fetchall()]
+
+
+    def update_pinned_verse_position(self, surah, ayah, group_id, position):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("""
+                UPDATE pinned_verses 
+                SET position = ? 
+                WHERE surah = ? AND ayah = ? AND group_id = ?
+            """, (position, surah, ayah, group_id))
+
+    def get_pinned_verses_by_group_ordered(self, group_id):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT surah, ayah, timestamp, position 
+                FROM pinned_verses 
+                WHERE group_id = ?
+                ORDER BY position ASC, timestamp DESC
+            """, (group_id,))
+            return [{
+                'surah': row[0],
+                'ayah': row[1],
+                'timestamp': row[2],
+                'position': row[3]
+            } for row in cursor.fetchall()]
+
+    def reorder_pinned_verses(self, group_id, new_order):
+        """Update positions for all verses in a group based on new order"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            for position, (surah, ayah) in enumerate(new_order):
+                conn.execute("""
+                    UPDATE pinned_verses 
+                    SET position = ? 
+                    WHERE surah = ? AND ayah = ? AND group_id = ?
+                """, (position, surah, ayah, group_id))
+
+    def get_active_pinned_verses_ordered(self):
+        """Return active pinned verses ordered by position"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT pv.surah, pv.ayah, pv.timestamp, pv.position
+                FROM pinned_verses pv
+                JOIN pinned_groups pg ON pv.group_id = pg.id
+                WHERE pg.active = 1
+                ORDER BY pv.position ASC, pv.timestamp DESC
+            """)
+            return [{
+                'surah': row[0],
+                'ayah': row[1],
+                'timestamp': row[2],
+                'position': row[3]
             } for row in cursor.fetchall()]

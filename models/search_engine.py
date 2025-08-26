@@ -122,23 +122,23 @@ class QuranSearch:
         text = unicodedata.normalize('NFC', text)
         return text.strip()
 
-        
+            
     def search_verses(self, query, is_dark_theme=False, highlight_words=[]):
         normalized_query = self._normalize_text(query)
         results = []
-        total_occurrences = 0  # Initialize total occurrences
+        total_occurrences = 0
 
         for (surah, ayah), data in self._simplified.items():
             normalized_text = self._normalize_text(data['text'])
             if normalized_query in normalized_text:
-                # Count occurrences in this ayah
                 occurrences = normalized_text.count(normalized_query)
                 total_occurrences += occurrences
 
-                # Highlighting logic remains the same
                 uthmani_text = self._uthmani.get((surah, ayah), {}).get('text', '')
-                highlighted_simplified = self.highlight(data['text'], query, is_dark_theme, highlight_words)
-                highlighted_uthmani = self.highlight(uthmani_text, query, is_dark_theme, highlight_words)
+                
+                # Apply search highlighting
+                highlighted_simplified = self.highlight(data['text'], query, is_dark_theme)
+                highlighted_uthmani = self.highlight(uthmani_text, query, is_dark_theme)
 
                 results.append({
                     'surah': surah,
@@ -148,9 +148,7 @@ class QuranSearch:
                     'chapter': self.get_chapter_name(surah)
                 })
         
-        # Sort results by surah and ayah
-        results = sorted(results, key=lambda x: (x['surah'], x['ayah']))
-        return results, total_occurrences  # Return both results and occurrences
+        return results, total_occurrences
 
     def get_verse(self, surah, ayah, version='simplified'):
         """

@@ -1,4 +1,5 @@
 
+import re
 from collections import OrderedDict
 
 from PyQt5 import QtWidgets, QtCore, QtGui
@@ -36,6 +37,7 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         if self.parent():
             self.parent().viewport().update()
 
+
     def paint(self, painter, option, index):
         painter.save()
         result = index.data(QtCore.Qt.UserRole)
@@ -60,10 +62,11 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
             bg_color = QtGui.QColor("#3b3b1f" if self.is_dark else "#F0E68C")
             painter.fillRect(option.rect, bg_color)
 
-        # Render text
+        # Render text - APPLY HIGHLIGHTING TO ALL VERSES (BOTH PINNED AND NON-PINNED)
         doc = QtGui.QTextDocument()
         doc.setDocumentMargin(2)
-        text = self._format_text(result, self.version)
+        text = self._format_text(result, self.version, is_pinned)  # Pass is_pinned to format_text
+        #print(text)
         doc.setHtml(text)
         text_option = doc.defaultTextOption()
         text_option.setTextDirection(QtCore.Qt.RightToLeft)
@@ -81,18 +84,9 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         painter.restore()
 
 
-    def _format_text(self, result, version):
+    def _format_text(self, result, version, is_pinned):
         text = result.get(f"text_{version}", "")
-
-        # Check if verse is pinned
-        is_pinned = hasattr(self.parent().window(), 'pinned_verses') and any(
-            v['surah'] == result['surah'] and v['ayah'] == result['ayah']
-            for v in self.parent().window().pinned_verses
-        )
-
-        # Indicator icon
-        pin_indicator = """<span style="color: goldenrod;">&#9733;</span> """ if is_pinned else ""
-
+        
         # Apply highlighting if enabled
         main_window = self.parent().window()
         if hasattr(main_window, 'highlight_action') and main_window.highlight_action.isChecked():
@@ -103,12 +97,13 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
                 
                 # Apply highlighting for each word
                 for word in highlight_words:
-                    # Replace every occurrence of the word with highlighted version
-                    text = text.replace(
-                        word, 
-                        f"<span style='color: {highlight_color};'>{word}</span>"
-                    )
+                    # Use regex to replace the word while preserving existing HTML
+                    pattern = re.compile(re.escape(word), re.IGNORECASE)
+                    text = pattern.sub(f'<span style="color: {highlight_color};">{word}</span>', text)
 
+        # Pin indicator
+        pin_indicator = """<span style="color: goldenrod;">&#9733;</span> """ if is_pinned else ""
+        
         return f"""
         <div dir="rtl" style="text-align:left; width:100%; margin:0; padding:10px;">
             <div style="font-family: 'Amiri';
@@ -128,9 +123,9 @@ class QuranDelegate(QtWidgets.QStyledItemDelegate):
         result = index.data(QtCore.Qt.UserRole)
         if not result:
             return QtCore.QSize(0, 0)
-        
+
         doc = QtGui.QTextDocument()
-        doc.setHtml(self._format_text(result, self.version))
+        doc.setHtml(self._format_text(result, self.version,result.get("is_pinned",False)))
         doc.setTextWidth(option.rect.width() - 20)
         return QtCore.QSize(int(doc.idealWidth()) + 20, int(doc.size().height()))
 

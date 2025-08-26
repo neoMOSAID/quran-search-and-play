@@ -7,8 +7,12 @@ class DetailView(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.notes_widget = NotesWidget()
-        self.notes_widget.back_button.clicked.connect(self.backRequested.emit)
+        self.notes_widget.back_button.clicked.connect(self.handle_back_requested)
         self.initUI()
+
+    def handle_back_requested(self):
+        if not self.notes_widget.edit_checkbox.isChecked():
+            self.backRequested.emit()
 
     def initUI(self):
         layout = QtWidgets.QVBoxLayout(self)

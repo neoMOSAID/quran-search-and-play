@@ -263,6 +263,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Right"), self, activated=self.navigate_surah_right)
         #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+T"), self, activated=self.show_course_manager)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+T"), self, activated=self.add_ayah_to_course)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Y"), self, activated=self.add_search_to_course)
         #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+B"), self, activated=self.show_bookmarks)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+B"), self, activated=self.bookmark_current_ayah)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+="), self, activated=self.increase_font_size)  # Ctrl++
@@ -349,7 +350,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
             if len(group) == 1:
                 # Single verse
                 verse = group[0]
-                text_list.append(f"{verse['text']} ({verse['chapter']} {verse['ayah']})")
+                text_list.append(f"﴿{verse['text']}﴾ ({verse['chapter']} {verse['ayah']})")
             else:
                 # Group of consecutive verses
                 texts = [f"{v['text']} ({v['ayah']})• " for v in group]
@@ -364,7 +365,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                 else:
                     ref = f"{chapter} الآيات {first_ayah}-{last_ayah}"
                 
-                text_list.append(f"{combined_text} ({ref})")
+                text_list.append(f"﴿{combined_text}﴾ ({ref})")
 
         full_text = "\n".join(text_list)
         clipboard = QtWidgets.QApplication.clipboard()
@@ -993,9 +994,9 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.model.loading_complete.disconnect()  # Clean up connection
 
     def update_results(self, results, query=None):
-
+        pinned_verses_ordered = self.db.get_active_pinned_verses_ordered()
         pinned_full = []
-        for pin in self.pinned_verses:
+        for pin in pinned_verses_ordered:
             try:
                 verse_uthmani = self.search_engine.get_verse(pin['surah'], pin['ayah'], 'uthmani')
                 verse_simplified = self.search_engine.get_verse(pin['surah'], pin['ayah'], 'simplified')
@@ -1049,7 +1050,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
     def handle_backspace(self):
         # Switch to results view if in detail view
-        if self.detail_view.isVisible():
+        if self.detail_view.isVisible() and not self.detail_view.notes_widget.edit_checkbox.isChecked():
             self.show_results_view()
         
         # Get current selection
@@ -1275,6 +1276,86 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.model.load_remaining_results()
             
         return False
+
+    def _add_search_to_course(self, course_id, query):
+        """Add a search query to a course"""
+        courses = self.db.get_all_courses()
+        course = next((c for c in courses if c[0] == course_id), None)
+        if not course:
+            return
+
+        _, title, items = course
+        updated_items = items.copy()
+        
+        # Create search item
+        search_item = {
+            "text": f"Search: {query}",
+            "user_data": {
+                "type": "search",
+                "query": query
+            }
+        }
+        
+        # Check if this search already exists in the course
+        for item in updated_items:
+            if (item.get('user_data', {}).get('type') == 'search' and 
+                item.get('user_data', {}).get('query') == query):
+                self.showMessage("This search already exists in the course", 3000)
+                return
+                
+        updated_items.append(search_item)
+        
+        # Save the course
+        self.db.save_course(course_id, title, updated_items)
+        self.showMessage(f"Added search to course: {title}", 3000)
+        
+        # Refresh course manager if open
+        if hasattr(self, 'course_dialog') and self.course_dialog:
+            self.course_dialog.refresh_course()
+            
+    def add_search_to_course(self):
+        """Add current search query to course if method is Text and has results"""
+        # Check if search method is "Text"
+        if self.search_method_combo.currentText() != "Text":
+            self.showMessage("Only text searches can be added to courses", 3000, bg="red")
+            return
+            
+        # Check if there are results
+        if not self.model.results or len(self.model.results) == 0:
+            self.showMessage("No search results to add to course", 3000, bg="red")
+            return
+            
+        # Get the search query
+        query = self.search_input.text().strip()
+        if not query:
+            self.showMessage("No search query to add", 3000, bg="red")
+            return
+            
+        # Check for unsaved changes in course dialog
+        if hasattr(self, 'course_dialog') and self.course_dialog and self.course_dialog.unsaved_changes:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                'Unsaved Changes',
+                'You have unsaved changes in the course manager. Save changes first?',
+                QtWidgets.QMessageBox.Save | 
+                QtWidgets.QMessageBox.Discard |
+                QtWidgets.QMessageBox.Cancel
+            )
+            
+            if reply == QtWidgets.QMessageBox.Cancel:
+                return
+            elif reply == QtWidgets.QMessageBox.Save:
+                self.course_dialog.save_course()
+                
+        # Show course selection dialog
+        dialog = CourseSelectionDialog(self.db, self)
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            course_id = dialog.get_selected_course()
+            if course_id:
+                self._add_search_to_course(course_id, query)
+                # Refresh course manager if open
+                if hasattr(self, 'course_dialog') and self.course_dialog:
+                    self.course_dialog.load_course(course_id)
 
     def add_ayah_to_course(self):
         # Only check for unsaved changes if course dialog exists

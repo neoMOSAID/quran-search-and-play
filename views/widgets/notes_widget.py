@@ -94,9 +94,11 @@ class NotesWidget(QtWidgets.QWidget):
         if is_editable:
             #self.editor.setStyleSheet("background-color: #FFFFCC;")  # Light yellow
             self.status_label.setText("وضع التعديل مفعل")
+            self.back_button.setEnabled(False)
         else:
             self.editor.setStyleSheet("")  # Reset to default
             self.status_label.clear()
+            self.back_button.setEnabled(True)
             
             # Revert to original content if not saved
             current_content = self.editor.toPlainText().strip()
