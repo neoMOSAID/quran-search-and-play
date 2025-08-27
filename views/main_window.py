@@ -253,7 +253,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+J"), self, activated=self.handle_ctrlj)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+K"), self, 
                             activated=self.audio_controller.load_surah_from_current_playback)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+N"), self, activated=self.new_note)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+N"), self, activated=self.focus_note_editor)
         #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+N"), self, activated=self.show_notes_manager)
         #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+E"), self, activated=self.show_data_transfer)
         #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+I"), self, activated=self.show_data_transfer)
@@ -273,7 +273,6 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+MouseWheelDown"), self, activated=self.decrease_font_size)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+C"), self, activated=self.copy_all_results)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+C"), self, activated=self.copy_selected_results)
-        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Alt+N"), self, activated=self.show_quick_note_dialog)
 
     def increase_font_size(self):
         new_size = self.delegate.base_font_size + 1
@@ -397,9 +396,19 @@ class QuranBrowser(QtWidgets.QMainWindow):
         clipboard.setText(full_text)
         self.showMessage("Copied all results to clipboard", 3000)
 
-    def new_note(self):
-        if self.detail_view.isVisible():
-            self.detail_view.notes_widget.new_note()
+    def focus_note_editor(self):
+        # If not in detail view, show it first
+        if not self.detail_view.isVisible():
+            index = self.results_view.currentIndex()
+            if index.isValid():
+                self.show_detail_view(index)
+            else:
+                self.showMessage("No verse selected", 3000, bg="red")
+                return
+        
+        # Enable editing and focus on the note editor
+        self.detail_view.notes_widget.enable_editing()
+        
 
     def show_notes_manager(self):
         if not self.notes_dialog:
@@ -479,60 +488,6 @@ class QuranBrowser(QtWidgets.QMainWindow):
     def handle_course_search(self, query):
         self.search_input.setText(query)
         self.search()
-
-    def show_quick_note_dialog(self):
-        index = self.results_view.currentIndex()
-        if not index.isValid():
-            self.showMessage("No verse selected", 3000, bg="red")
-            return
-        
-        result = self.model.data(index, QtCore.Qt.UserRole)
-        if not result:
-            return
-        
-        try:
-            surah = int(result['surah'])
-            ayah = int(result['ayah'])
-        except (KeyError, ValueError):
-            self.showMessage("Invalid verse data", 3000, bg="red")
-            return
-        
-        if not hasattr(self, 'note_dialog'):
-            self.note_dialog = NoteDialog(self)
-            self.note_dialog.accepted.connect(self.save_quick_note)
-        
-        self.note_dialog.surah = surah
-        self.note_dialog.ayah = ayah
-        self.note_dialog.chapter = self.search_engine.get_chapter_name(surah)
-        self.note_dialog.editor.clear()
-        
-        # Update the label with the desired text
-        self.note_dialog.info_label.setText(
-            f"إضافة تسجيل الى الآية {ayah} من سورة {self.note_dialog.chapter}"
-        )
-        
-        self.note_dialog.show()
-        self.note_dialog.raise_()
-        self.note_dialog.activateWindow()
-
-
-    def save_quick_note(self):
-        content = self.note_dialog.editor.toPlainText().strip()
-        if not content:
-            return
-        
-        self.db.add_note(
-            self.note_dialog.surah,
-            self.note_dialog.ayah,
-            content
-        )
-        
-        # Refresh notes if detail view is visible
-        if self.detail_view.isVisible():
-            self.detail_view.notes_widget.load_notes()
-        
-        self.showMessage("Note saved successfully", 2000)
-
 
     def pin_current_verse(self):
         index = self.results_view.currentIndex()

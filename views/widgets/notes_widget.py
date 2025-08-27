@@ -115,6 +115,41 @@ class NotesWidget(QtWidgets.QWidget):
         current_content = self.editor.toPlainText().strip()
         self.save_button.setEnabled(current_content != self.original_content)
 
+    def enable_editing(self):
+        """Enable editing and focus on the editor"""
+        self.edit_checkbox.setChecked(True)
+        self.editor.setFocus()
+
+    def delete_note(self):
+        if not (self.current_surah and self.current_ayah):
+            return
+            
+        # Check if there's a note to delete
+        notes = self.db.get_notes(self.current_surah, self.current_ayah)
+        if not notes:
+            return
+            
+        # Show confirmation dialog
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "تأكيد الحذف",
+            "هل أنت متأكد من حذف هذا التسجيل؟",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.Yes:
+            # Delete the note
+            self.db.delete_all_notes(self.current_surah, self.current_ayah)
+            self.original_content = ""
+            self.editor.clear()
+            self.status_label.setText("تم حذف التسجيل")
+            
+            # Clear status message after 2 seconds
+            QtCore.QTimer.singleShot(2000, lambda: self.status_label.clear())
+            
+            # Reset edit mode
+            self.edit_checkbox.setChecked(False)
+
     def save_note(self):
         if not (self.current_surah and self.current_ayah):
             return
