@@ -847,11 +847,12 @@ class QuranBrowser(QtWidgets.QMainWindow):
             results = self.search_engine.search_by_surah(surah, is_dark_theme, self.highlight_words)
             for result in results:
                 if self.db.has_note(result['surah'], result['ayah']):
-                    #bullet = "◉ "  # smaller bullet than "●" "• "
                     bullet = "<span style='font-size:32px;'>•</span> "
                     result['text_simplified'] = bullet + result['text_simplified']
                     result['text_uthmani'] = bullet + result['text_uthmani']
             self.update_results(results, f"Surah {surah} (Automatic Selection)")
+            # Scroll to the top after loading new surah
+            self.results_view.scrollToTop()
         except Exception as e:
             logging.exception("Error during surah selection")
             self.showMessage("Error loading surah", 3000, bg="red")
