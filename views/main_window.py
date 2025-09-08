@@ -426,9 +426,14 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.compact_help_dialog.show()
 
     def delete_note(self):
+        # Only delete note if we're in the detail view
         if self.detail_view.isVisible():
             self.detail_view.notes_widget.delete_note()
+        else:
+            # If not in detail view, show a message
+            self.showMessage("الرجاء فتح عرض التفاصيل أولاً", 5000, bg="red")
 
+            
     def handle_loading_started(self, total_results):
         self.showMessage(f"Loading {total_results} results...", 0)  # 0 = indefinite
 

@@ -1,4 +1,6 @@
 from PyQt5 import QtWidgets, QtGui, QtCore
+from utils.settings import AppSettings
+
 from models.database import DbManager
 from models.search_engine import QuranSearch
 
@@ -9,6 +11,7 @@ class NotesWidget(QtWidgets.QWidget):
         self.current_surah = None
         self.current_ayah = None
         self.original_content = ""
+        self.settings = AppSettings()
         self.init_ui()
 
     def init_ui(self):
@@ -43,7 +46,18 @@ class NotesWidget(QtWidgets.QWidget):
         
         # Spacer to push other controls to the right
         button_layout.addStretch(1)
+
+        # Font size controls - new buttons
+        self.decrease_font_btn = QtWidgets.QPushButton("A-")
+        self.decrease_font_btn.setFixedSize(30, 30)
+        self.decrease_font_btn.clicked.connect(self.decrease_font_size)
+        button_layout.addWidget(self.decrease_font_btn)
         
+        self.increase_font_btn = QtWidgets.QPushButton("A+")
+        self.increase_font_btn.setFixedSize(30, 30)
+        self.increase_font_btn.clicked.connect(self.increase_font_size)
+        button_layout.addWidget(self.increase_font_btn)
+
         # Edit checkbox - middle right
         self.edit_checkbox = QtWidgets.QCheckBox("تمكين التعديل")
         self.edit_checkbox.stateChanged.connect(self.toggle_edit_mode)
@@ -62,6 +76,33 @@ class NotesWidget(QtWidgets.QWidget):
         button_layout.addWidget(self.save_button)
 
         layout.addWidget(button_container)
+
+        self.load_font_setting() 
+
+    def increase_font_size(self):
+        if self.font_size < 24:  # Set maximum size as needed
+            self.font_size += 1
+            self.update_editor_font()
+            self.save_font_setting()
+
+    def decrease_font_size(self):
+        if self.font_size > 8:  # Set minimum size as needed
+            self.font_size -= 1
+            self.update_editor_font()
+            self.save_font_setting()
+
+    def update_editor_font(self):
+        font = self.editor.font()
+        font.setPointSize(self.font_size)
+        self.editor.setFont(font)
+
+    def save_font_setting(self):
+        self.settings.set("notes_font_size", self.font_size)
+
+    def load_font_setting(self):
+        saved_size = self.settings.value("notes_font_size", 12, type=int)
+        self.font_size = saved_size
+        self.update_editor_font()
 
     def set_ayah(self, surah, ayah):
         self.current_surah = surah
