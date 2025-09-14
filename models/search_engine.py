@@ -127,34 +127,40 @@ class QuranSearch:
         """Parse search query for special operators and patterns"""
         preserve_hamza = '@' in query
         query = query.replace('@', '')  # Remove @ symbol if present
-        
-        # Check for wildcard patterns
-        starts_with_wildcard = query.startswith('%')
-        ends_with_wildcard = query.endswith('%')
-        
-        if starts_with_wildcard and ends_with_wildcard and len(query) > 2:
-            # %term% - exact word match
+
+        # If the query contains '#', treat it as an exact word search (%term%)
+        if '#' in query and len(query) > 0:
             pattern_type = 'exact_word'
-            term = query[1:-1]
-        elif starts_with_wildcard and len(query) > 1:
-            # %term - ends with
-            pattern_type = 'ends_with'
-            term = query[1:]
-        elif ends_with_wildcard and len(query) > 1:
-            # term% - starts with
-            pattern_type = 'starts_with'
-            term = query[:-1]
+            term = query.replace('#', '')
         else:
-            # Regular substring search
-            pattern_type = 'substring'
-            term = query
-        
+            # Check for wildcard patterns
+            starts_with_wildcard = query.startswith('%')
+            ends_with_wildcard = query.endswith('%')
+
+            if starts_with_wildcard and ends_with_wildcard and len(query) > 2:
+                # %term% - exact word match
+                pattern_type = 'exact_word'
+                term = query[1:-1]
+            elif starts_with_wildcard and len(query) > 1:
+                # %term - ends with
+                pattern_type = 'ends_with'
+                term = query[1:]
+            elif ends_with_wildcard and len(query) > 1:
+                # term% - starts with
+                pattern_type = 'starts_with'
+                term = query[:-1]
+            else:
+                # Regular substring search
+                pattern_type = 'substring'
+                term = query
+
         return {
             'term': term,
             'pattern_type': pattern_type,
             'preserve_hamza': preserve_hamza
         }
-            
+
+  
     def search_verses(self, query, is_dark_theme=False, highlight_words=[]):
         # Parse the search query
         search_params = self._parse_search_query(query)
@@ -605,3 +611,7 @@ class QuranWordCache:
         except Exception as e:
             logging.error(f"Cache regeneration failed: {str(e)}")
             cls._words = []
+
+
+
+
