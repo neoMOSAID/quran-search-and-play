@@ -47,6 +47,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.pinned_dialog = None
         self.compact_help_dialog = None
         self.current_detail_result = None
+        self.resizing = False
         self.current_view = None  # Will track {'type': 'surah'/'search', 'surah': x, 'method': y, 'query': z}
 
         self._status_msg = ""
@@ -86,6 +87,27 @@ class QuranBrowser(QtWidgets.QMainWindow):
         
         self.original_style = self.result_count.styleSheet()
 
+
+    @property
+    def search_input(self):
+        return self.search_input_v if self.is_vertical_layout else self.search_input_h
+    
+    @property
+    def version_combo(self):
+        return self.version_combo_v if self.is_vertical_layout else self.version_combo_h
+    
+    @property
+    def search_method_combo(self):
+        return self.search_method_combo_v if self.is_vertical_layout else self.search_method_combo_h
+    
+    @property
+    def surah_combo(self):
+        return self.surah_combo_v if self.is_vertical_layout else self.surah_combo_h
+    
+    @property
+    def clear_button(self):
+        return self.clear_button_v if self.is_vertical_layout else self.clear_button_h
+
     def __del__(self):
         try:
             self.model.loading_complete.disconnect(self.handle_pending_scroll)
@@ -93,40 +115,122 @@ class QuranBrowser(QtWidgets.QMainWindow):
             pass
 
     def init_ui(self):
-        # Create search bar widgets.
-        self.search_input = SearchLineEdit()
-        self.version_combo = QtWidgets.QComboBox()
-        self.version_combo.addItems(["Show Uthmani", "Show Simplified"])
-        self.search_method_combo = QtWidgets.QComboBox()
-        self.search_method_combo.addItems(["Text", "Surah", "Surah FirstAyah LastAyah"])
-        self.surah_combo = QtWidgets.QComboBox()
-        self.surah_combo.addItems(self.search_engine.get_chapters_names())
-        self.clear_button = QtWidgets.QPushButton("Clear")
+        # Create search bar widgets for horizontal layout
+        self.search_input_h = SearchLineEdit()
+        self.version_combo_h = QtWidgets.QComboBox()
+        self.version_combo_h.addItems(["Show Uthmani", "Show Simplified"])
+        self.search_method_combo_h = QtWidgets.QComboBox()
+        self.search_method_combo_h.addItems(["Text", "Surah", "Surah FirstAyah LastAyah"])
+        self.surah_combo_h = QtWidgets.QComboBox()
+        self.surah_combo_h.addItems(self.search_engine.get_chapters_names())
+        self.clear_button_h = QtWidgets.QPushButton("Clear")
+        
+        # Create search bar widgets for vertical layout
+        self.search_input_v = SearchLineEdit()
+        self.version_combo_v = QtWidgets.QComboBox()
+        self.version_combo_v.addItems(["Show Uthmani", "Show Simplified"])
+        self.search_method_combo_v = QtWidgets.QComboBox()
+        self.search_method_combo_v.addItems(["Text", "Surah", "Surah FirstAyah LastAyah"])
+        self.surah_combo_v = QtWidgets.QComboBox()
+        self.surah_combo_v.addItems(self.search_engine.get_chapters_names())
+        self.clear_button_v = QtWidgets.QPushButton("Clear")
 
-        # Build the search bar as a compact widget.
-        search_bar = QtWidgets.QWidget()
-        search_layout = QtWidgets.QHBoxLayout(search_bar)
-        search_layout.setContentsMargins(5, 5, 5, 5)
-        search_layout.setSpacing(10)
-        search_layout.addWidget(QtWidgets.QLabel("Surah:"))
-        search_layout.addWidget(self.surah_combo)
-        search_layout.addWidget(QtWidgets.QLabel("Version:"))
-        search_layout.addWidget(self.version_combo)
-        search_layout.addWidget(QtWidgets.QLabel("Method:"))
-        search_layout.addWidget(self.search_method_combo)
-        search_layout.addWidget(self.search_input)
-        search_layout.addWidget(self.clear_button)
+        # Set size policies for horizontal layout widgets
+        for widget in [self.search_input_h, self.version_combo_h, self.search_method_combo_h, 
+                      self.surah_combo_h, self.clear_button_h]:
+            widget.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
+            widget.setMaximumHeight(30)  # Compact height for horizontal layout
 
-        # Ensure the search bar does not expand vertically.
-        search_bar.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-        search_bar.setMaximumHeight(50)
+        # Set size policies for vertical layout widgets
+        for widget in [self.version_combo_v, self.search_method_combo_v, self.surah_combo_v, self.clear_button_v]:
+            widget.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
+            widget.setMaximumHeight(30)  # Compact height for combo boxes in vertical layout
+            
+        # Give the search input more height in vertical layout
+        self.search_input_v.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        self.search_input_v.setMinimumHeight(40)  # More height for search input in vertical layout
 
-        # Use QVBoxLayout to stack search bar and results view.
+        # Create a container widget for the responsive search bar
+        self.search_bar_container = QtWidgets.QWidget()
+        self.search_bar_layout = QtWidgets.QVBoxLayout(self.search_bar_container)
+        self.search_bar_layout.setContentsMargins(5, 2, 5, 2)  # Reduced vertical margins
+        self.search_bar_layout.setSpacing(2)  # Reduced spacing
+        # Set size policy for the container
+        self.search_bar_container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed) 
+        #self.search_bar_container.setMinimumHeight(40)
+        
+        # Create stacked widget to hold both layouts
+        self.stacked_widget = QtWidgets.QStackedWidget()
+        self.search_bar_layout.addWidget(self.stacked_widget)
+        
+        # Create horizontal layout widget
+        self.horizontal_widget = QtWidgets.QWidget()
+        self.horizontal_layout = QtWidgets.QHBoxLayout(self.horizontal_widget)
+        self.horizontal_layout.setContentsMargins(0, 0, 0, 0)  # No margins
+        self.horizontal_layout.setSpacing(2)  # Reduced spacing
+        self.horizontal_widget.setMinimumHeight(40)
+        
+        # Add widgets to horizontal layout with stretch factors
+        self.horizontal_layout.addWidget(QtWidgets.QLabel("Surah:"), 0)
+        self.horizontal_layout.addWidget(self.surah_combo_h, 1)
+        self.horizontal_layout.addWidget(QtWidgets.QLabel("Version:"), 0)
+        self.horizontal_layout.addWidget(self.version_combo_h, 1)
+        self.horizontal_layout.addWidget(QtWidgets.QLabel("Method:"), 0)
+        self.horizontal_layout.addWidget(self.search_method_combo_h, 1)
+        self.horizontal_layout.addWidget(self.search_input_h, 3)  # More stretch for search input
+        self.horizontal_layout.addWidget(self.clear_button_h, 0)
+        
+        # Create vertical layout widget
+        self.vertical_widget = QtWidgets.QWidget()
+        self.vertical_layout = QtWidgets.QVBoxLayout(self.vertical_widget)
+        self.vertical_layout.setContentsMargins(0, 0, 0, 0)  # No margins
+        self.vertical_layout.setSpacing(2)  # Reduced spacing
+        self.vertical_widget.setMinimumHeight(80)
+        
+        # First row for combo boxes
+        self.combo_row = QtWidgets.QHBoxLayout()
+        self.combo_row.setContentsMargins(0, 0, 0, 0)  # No margins
+        self.combo_row.setSpacing(5)  # Reduced spacing
+        
+        # Add widgets to combo row with stretch factors
+        self.combo_row.addWidget(QtWidgets.QLabel("Surah:"), 0)
+        self.combo_row.addWidget(self.surah_combo_v, 1)
+        self.combo_row.addWidget(QtWidgets.QLabel("Version:"), 0)
+        self.combo_row.addWidget(self.version_combo_v, 1)
+        self.combo_row.addWidget(QtWidgets.QLabel("Method:"), 0)
+        self.combo_row.addWidget(self.search_method_combo_v, 1)
+        
+        # Second row for search input and clear button
+        self.input_row = QtWidgets.QHBoxLayout()
+        self.input_row.setContentsMargins(0, 0, 0, 0)  # No margins
+        self.input_row.setSpacing(5)  # Reduced spacing
+        
+        # Add widgets to input row with stretch factors
+        self.input_row.addWidget(self.search_input_v, 1)
+        self.input_row.addWidget(self.clear_button_v, 0)
+        
+        # Add rows to vertical layout
+        self.vertical_layout.addLayout(self.combo_row)
+        self.vertical_layout.addLayout(self.input_row)
+        
+        # Add both layouts to the stacked widget
+        self.stacked_widget.addWidget(self.horizontal_widget)
+        self.stacked_widget.addWidget(self.vertical_widget)
+        
+        # Start with horizontal layout
+        self.stacked_widget.setCurrentIndex(0)
+        self.stacked_widget.setMaximumHeight(40)
+        self.is_vertical_layout = False
+        
+        # Connect signals for both sets of widgets
+        self.setup_widget_connections()       
+        
+        # Use QVBoxLayout to stack search bar and results view
         central = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(central)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
-        layout.addWidget(search_bar)  # Compact search bar at the top.
+        layout.setContentsMargins(5, 2, 5, 2)  # Reduced vertical margins
+        layout.setSpacing(2)  # Reduced spacing
+        layout.addWidget(self.search_bar_container)  # Responsive search bar at the top
 
         # Create the results and detail views in a QSplitter.
         self.splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
@@ -197,6 +301,104 @@ class QuranBrowser(QtWidgets.QMainWindow):
         # self.setWindowTitle("Quran Search")
         # self.resize(1200, 500)
 
+    def setup_widget_connections(self):
+        """Connect signals for both sets of widgets to keep them in sync"""
+        # Connect version combo boxes
+        self.version_combo_h.currentIndexChanged.connect(
+            lambda index: self.version_combo_v.setCurrentIndex(index) if self.version_combo_v.currentIndex() != index else None
+        )
+        self.version_combo_v.currentIndexChanged.connect(
+            lambda index: self.version_combo_h.setCurrentIndex(index) if self.version_combo_h.currentIndex() != index else None
+        )
+        
+        # Connect search method combo boxes
+        self.search_method_combo_h.currentIndexChanged.connect(
+            lambda index: self.search_method_combo_v.setCurrentIndex(index) if self.search_method_combo_v.currentIndex() != index else None
+        )
+        self.search_method_combo_v.currentIndexChanged.connect(
+            lambda index: self.search_method_combo_h.setCurrentIndex(index) if self.search_method_combo_h.currentIndex() != index else None
+        )
+        
+        # Connect surah combo boxes
+        self.surah_combo_h.currentIndexChanged.connect(
+            lambda index: self.surah_combo_v.setCurrentIndex(index) if self.surah_combo_v.currentIndex() != index else None
+        )
+        self.surah_combo_v.currentIndexChanged.connect(
+            lambda index: self.surah_combo_h.setCurrentIndex(index) if self.surah_combo_h.currentIndex() != index else None
+        )
+        
+        # Connect search inputs
+        self.search_input_h.textChanged.connect(
+            lambda text: self.search_input_v.setText(text) if self.search_input_v.text() != text else None
+        )
+        self.search_input_v.textChanged.connect(
+            lambda text: self.search_input_h.setText(text) if self.search_input_h.text() != text else None
+        )
+        
+        # Connect return pressed signals
+        self.search_input_h.returnPressed.connect(self.search)
+        self.search_input_v.returnPressed.connect(self.search)
+        
+        # Connect clear buttons
+        self.clear_button_h.clicked.connect(self.clear_search)
+        self.clear_button_v.clicked.connect(self.clear_search)
+        
+        # Connect version change signals
+        self.version_combo_h.currentIndexChanged.connect(self.handle_version_change)
+        self.version_combo_v.currentIndexChanged.connect(self.handle_version_change)
+        
+        # Connect surah selection signals
+        self.surah_combo_h.currentIndexChanged.connect(self.handle_surah_selection)
+        self.surah_combo_v.currentIndexChanged.connect(self.handle_surah_selection)
+        
+        # Connect search method signals
+        self.search_method_combo_h.currentIndexChanged.connect(self.search)
+        self.search_method_combo_v.currentIndexChanged.connect(self.search)
+
+    def resizeEvent(self, event):
+        # Prevent recursive resize events
+        if self.resizing:
+            return
+            
+        self.resizing = True
+        
+        try:
+            # Call parent resize event first
+            super().resizeEvent(event)
+            
+            # Switch layout based on window width
+            width = self.width()
+            threshold = 800  # Width threshold for switching layouts
+            
+            if width < threshold and not self.is_vertical_layout:
+                # Switch to vertical layout
+                self.stacked_widget.setCurrentIndex(1)
+                self.is_vertical_layout = True
+                self.stacked_widget.setMaximumHeight(80)
+                # Allow more height for vertical layout
+                self.search_bar_container.setMaximumHeight(100)
+                # Force a refresh after a short delay
+                QtCore.QTimer.singleShot(10, self.update_after_resize)
+            elif width >= threshold and self.is_vertical_layout:
+                # Switch to horizontal layout
+                self.stacked_widget.setCurrentIndex(0)
+                self.is_vertical_layout = False
+                # Compact height for horizontal layout
+                self.search_bar_container.setMaximumHeight(40)
+                # Force a refresh after a short delay
+                QtCore.QTimer.singleShot(10, self.update_after_resize)
+        finally:
+            # Always reset the flag, even if an exception occurs
+            QtCore.QTimer.singleShot(50, self.reset_resizing_flag)
+                
+    def update_after_resize(self):
+        """Update the layout after a resize operation"""
+        self.search_bar_container.updateGeometry()
+        self.update()
+        
+    def reset_resizing_flag(self):
+        """Reset the resizing flag after a delay"""
+        self.resizing = False
 
     def setup_connections(self):
         self.search_input.returnPressed.connect(self.search)
@@ -230,10 +432,12 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
     def setup_shortcuts(self):
         QtWidgets.QShortcut(QtGui.QKeySequence("Space"), self, activated=self.handle_space)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Space"), self, activated=self.read_current_verse)
         QtWidgets.QShortcut(QtGui.QKeySequence("Escape"), self, activated=self.toggle_version)
         QtWidgets.QShortcut(QtGui.QKeySequence("Backspace"), self, activated=self.handle_backspace)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, activated=self.input_focus)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+F"), self, activated=self.handle_ctrlsf)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+1"), self, activated=self.load_first_surah)
         #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+D"), self, activated=self.toggle_theme)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+L"), self, 
                             activated=self.configure_highlight_words)
@@ -787,19 +991,35 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtCore.QTimer.singleShot(100, lambda: self.handle_surah_selection(self.surah_combo.currentIndex()))
 
     def handle_version_change(self):
+        # This will be called by both version combo boxes
         version = self.get_current_version()
         self.delegate.update_version(version)
         self.results_view.viewport().update()
         if self.detail_view.isVisible() and self.current_detail_result:
             is_dark_theme = self.theme_action.isChecked()
-            self.detail_view.display_ayah(self.current_detail_result, self.search_engine, version,is_dark_theme)
+            self.detail_view.display_ayah(self.current_detail_result, self.search_engine, version, is_dark_theme)
 
     def get_current_version(self):
-        return "uthmani" if "Uthmani" in self.version_combo.currentText() else "simplified"
+        # Use the appropriate combo based on current layout
+        if self.is_vertical_layout:
+            return "uthmani" if "Uthmani" in self.version_combo_v.currentText() else "simplified"
+        else:
+            return "uthmani" if "Uthmani" in self.version_combo_h.currentText() else "simplified"
+
+    def load_first_surah(self):
+        """Directly load the first surah (Al-Fatiha)"""
+        self.surah_combo.setCurrentIndex(0)  # First item in the combo box
+        self.handle_surah_selection(0)  # Load the first surah
 
     def handle_surah_selection(self, index):
+        # This will be called by both surah combo boxes
         if index < 0:
-            index = self.surah_combo.currentIndex()
+            # Use the appropriate combo based on current layout
+            if self.is_vertical_layout:
+                index = self.surah_combo_v.currentIndex()
+            else:
+                index = self.surah_combo_h.currentIndex()
+        
         surah = index + 1
         self.current_view = {'type': 'surah', 'surah': surah}
         try:
@@ -892,15 +1112,21 @@ class QuranBrowser(QtWidgets.QMainWindow):
     #         self.detail_view.notes_widget.editor.setFocus()
 
     def search(self):
-        if self.detail_view.isVisible():
-            self.show_results_view()
-
-        query = self.search_input.text().strip()
-        method = self.search_method_combo.currentText()
+        # Use the appropriate input based on current layout
+        if self.is_vertical_layout:
+            query = self.search_input_v.text().strip()
+        else:
+            query = self.search_input_h.text().strip()
+            
+        method = self.get_current_search_method()
         if not query and method == "Text":
             self.showMessage("Please enter a search query", 3000, bg="red")
             return
-        self.search_input.update_history(query)
+        
+        # Update history for both inputs
+        self.search_input_h.update_history(query)
+        self.search_input_v.update_history(query)
+        
         self.showMessage("Searching...", 2000)
 
         if (method == "Surah" and query.isdigit()) or method == "Surah FirstAyah LastAyah":
@@ -929,6 +1155,13 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.search_worker.results_ready.connect(self.handle_search_results)
         self.search_worker.error_occurred.connect(lambda error: self.showMessage(f"Search error: {error}", 3000, bg="red"))
         self.search_worker.start()
+
+    def get_current_search_method(self):
+        # Use the appropriate combo based on current layout
+        if self.is_vertical_layout:
+            return self.search_method_combo_v.currentText()
+        else:
+            return self.search_method_combo_h.currentText()
 
     def handle_search_results(self,method, results,total_occurrences):
         self.current_view = {'type': 'search', 'method': method, 'query': self.search_input.text()}
@@ -1049,6 +1282,33 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.results_view.show()
         self.results_view.setFocus()
 
+    def read_current_verse(self):
+        """Read the currently selected verse, stopping any ongoing playback first"""
+        # Stop any current playback
+        self.audio_controller.stop_playback()
+        
+        # Get the current selection
+        index = self.results_view.currentIndex()
+        if not index.isValid():
+            self.showMessage("No verse selected", 2000, bg="red")
+            return
+            
+        result = self.model.data(index, QtCore.Qt.UserRole)
+        if not result:
+            self.showMessage("No verse data available", 2000, bg="red")
+            return
+            
+        try:
+            surah = int(result.get('surah'))
+            ayah = int(result.get('ayah'))
+        except (ValueError, TypeError):
+            self.showMessage("Invalid verse data", 2000, bg="red")
+            return
+        
+        # Play the selected verse
+        self.audio_controller.play_current(surah, ayah, count=1)
+        self.showMessage(f"Playing Surah {surah}, Ayah {ayah}", 2000)
+        
     def handle_space(self):
         status = self.audio_controller.handle_space()
         
@@ -1546,10 +1806,16 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.settings.set("darkMode", dark)
 
     def clear_search(self):
-        self.search_input.clear()
+        # Clear both search inputs
+        self.search_input_h.clear()
+        self.search_input_v.clear()
         self.model.updateResults([])
         self.result_count.clear()
-        self.surah_combo.setCurrentIndex(0)
+        
+        # Reset both surah combo boxes
+        self.surah_combo_h.setCurrentIndex(0)
+        self.surah_combo_v.setCurrentIndex(0)
+        
         self.current_view = None
 
     def about_dialog(self):

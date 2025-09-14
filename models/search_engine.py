@@ -1,3 +1,4 @@
+### ./models/search_engine.py ###
 import re
 import os, sys
 import importlib.resources
@@ -110,28 +111,95 @@ class QuranSearch:
         return filtered
     
     @staticmethod   
-    def _normalize_text(text=""):
-        # Replace dagger alif with a regular alif before diacritics are removed.
-        #text = text.replace('ٰ', 'ا')
-        text = QuranSearch.replace_dagger_alif(text)
-        # Remove diacritics (all mark characters).
-        text = QuranSearch._remove_diacritics(text)
-        # Normalize various forms of alif and related characters.
-        text = QuranSearch._normalize_hamza(text)
+    def _normalize_text(text="", preserve_hamza=False):
+        if not preserve_hamza:
+            # Replace dagger alif with a regular alif before diacritics are removed.
+            text = QuranSearch.replace_dagger_alif(text)
+            # Remove diacritics (all mark characters).
+            text = QuranSearch._remove_diacritics(text)
+            # Normalize various forms of alif and related characters.
+            text = QuranSearch._normalize_hamza(text)
         # Recompose to NFC to standardize the text.
         text = unicodedata.normalize('NFC', text)
         return text.strip()
 
+    def _parse_search_query(self, query):
+        """Parse search query for special operators and patterns"""
+        preserve_hamza = '@' in query
+        query = query.replace('@', '')  # Remove @ symbol if present
+        
+        # Check for wildcard patterns
+        starts_with_wildcard = query.startswith('%')
+        ends_with_wildcard = query.endswith('%')
+        
+        if starts_with_wildcard and ends_with_wildcard and len(query) > 2:
+            # %term% - exact word match
+            pattern_type = 'exact_word'
+            term = query[1:-1]
+        elif starts_with_wildcard and len(query) > 1:
+            # %term - ends with
+            pattern_type = 'ends_with'
+            term = query[1:]
+        elif ends_with_wildcard and len(query) > 1:
+            # term% - starts with
+            pattern_type = 'starts_with'
+            term = query[:-1]
+        else:
+            # Regular substring search
+            pattern_type = 'substring'
+            term = query
+        
+        return {
+            'term': term,
+            'pattern_type': pattern_type,
+            'preserve_hamza': preserve_hamza
+        }
             
     def search_verses(self, query, is_dark_theme=False, highlight_words=[]):
-        normalized_query = self._normalize_text(query)
+        # Parse the search query
+        search_params = self._parse_search_query(query)
+        term = search_params['term']
+        pattern_type = search_params['pattern_type']
+        preserve_hamza = search_params['preserve_hamza']
+        
+        normalized_query = self._normalize_text(term, preserve_hamza)
         results = []
         total_occurrences = 0
 
         for (surah, ayah), data in self._simplified.items():
-            normalized_text = self._normalize_text(data['text'])
-            if normalized_query in normalized_text:
-                occurrences = normalized_text.count(normalized_query)
+            normalized_text = self._normalize_text(data['text'], preserve_hamza)
+            
+            # Apply the appropriate search pattern
+            match_found = False
+            occurrences = 0
+            
+            if pattern_type == 'substring':
+                if normalized_query in normalized_text:
+                    match_found = True
+                    occurrences = normalized_text.count(normalized_query)
+            elif pattern_type == 'starts_with':
+                # Split into words and check each word
+                words = normalized_text.split()
+                for word in words:
+                    if word.startswith(normalized_query):
+                        match_found = True
+                        occurrences += 1
+            elif pattern_type == 'ends_with':
+                # Split into words and check each word
+                words = normalized_text.split()
+                for word in words:
+                    if word.endswith(normalized_query):
+                        match_found = True
+                        occurrences += 1
+            elif pattern_type == 'exact_word':
+                # Split into words and check each word
+                words = normalized_text.split()
+                for word in words:
+                    if word == normalized_query:
+                        match_found = True
+                        occurrences += 1
+            
+            if match_found:
                 total_occurrences += occurrences
 
                 uthmani_text = self._uthmani.get((surah, ayah), {}).get('text', '')
@@ -301,11 +369,17 @@ class QuranSearch:
         5 verses before and 5 verses after the matching verse (or as many as available),
         with the matching verse highlighted.
         """
-        normalized_query = self._normalize_text(query)
+        # Parse the search query
+        search_params = self._parse_search_query(query)
+        term = search_params['term']
+        preserve_hamza = search_params['preserve_hamza']
+        
+        normalized_query = self._normalize_text(term, preserve_hamza)
         results = []
         
         for (surah, ayah), data in self._simplified.items():
-            if normalized_query in self._normalize_text(data['text']):
+            normalized_text = self._normalize_text(data['text'], preserve_hamza)
+            if normalized_query in normalized_text:
                 context_list = self.get_ayah_with_context(surah, ayah)
                 for r in context_list:
                     results.append(r)
@@ -341,10 +415,50 @@ class QuranSearch:
         return highlighted
 
     def _highlight_search(self, text, query, is_dark_theme):
-        # Existing highlight logic
-        if ' ' in query.strip():
-            return self.highlight_phrase(text, query, is_dark_theme)
-        return self.highlight_word(text, query, is_dark_theme)
+        # Parse the search query to handle special operators
+        search_params = self._parse_search_query(query)
+        term = search_params['term']
+        pattern_type = search_params['pattern_type']
+        preserve_hamza = search_params['preserve_hamza']
+        
+        normalized_query = self._normalize_text(term, preserve_hamza)
+        
+        if pattern_type == 'substring':
+            return self.highlight_phrase(text, term, is_dark_theme)
+        else:
+            # For pattern searches, highlight the entire word that matches
+            return self.highlight_pattern(text, term, pattern_type, is_dark_theme, preserve_hamza)
+
+    def highlight_pattern(self, text, query, pattern_type, is_dark_theme, preserve_hamza=False):
+        """Highlight words based on pattern type"""
+        highlight_color = "#FFFF00" if is_dark_theme else "#ff0000"
+        normalized_query = self._normalize_text(query, preserve_hamza)
+        
+        # Split text into words while preserving original whitespace
+        words = text.split()
+        highlighted = []
+        
+        for original_word in words:
+            # Normalize the current word (with same hamza preservation as search)
+            normalized_word = self._normalize_text(original_word, preserve_hamza)
+            
+            # Check if word matches the pattern
+            match = False
+            if pattern_type == 'starts_with':
+                match = normalized_word.startswith(normalized_query)
+            elif pattern_type == 'ends_with':
+                match = normalized_word.endswith(normalized_query)
+            elif pattern_type == 'exact_word':
+                match = normalized_word == normalized_query
+            
+            if match:
+                highlighted.append(
+                    f'<span style="font-weight: bold; color: {highlight_color};">{original_word}</span>'
+                )
+            else:
+                highlighted.append(original_word)
+        
+        return ' '.join(highlighted)
 
     def highlight_word(self, text, query, is_dark_theme):
         """Highlight entire words containing the query substring."""
