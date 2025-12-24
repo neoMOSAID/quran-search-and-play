@@ -29,6 +29,7 @@ from views.dialogs.notes_dialog import NoteDialog
 from views.dialogs.data_transfer import DataTransferDialog
 from views.dialogs.help_dialog import HelpDialog
 from views.dialogs.pinned_dialog import PinnedVersesDialog
+from views.dialogs.word_dictionary import WordDictionaryDialog
 
 
 from PyQt5.QtWidgets import QInputDialog
@@ -47,6 +48,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         self.pinned_dialog = None
         self.compact_help_dialog = None
         self.current_detail_result = None
+        self.word_dictionary_dialog = None
         self.resizing = False
         self.current_view = None  # Will track {'type': 'surah'/'search', 'surah': x, 'method': y, 'query': z}
 
@@ -477,10 +479,40 @@ class QuranBrowser(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+MouseWheelDown"), self, activated=self.decrease_font_size)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+C"), self, activated=self.copy_all_results)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+C"), self, activated=self.copy_selected_results)
+        #QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+D"), self, activated=self.show_word_dictionary)
+
+
+    def show_word_dictionary(self):
+        """Show word dictionary dialog (non-modal)"""
+        if not self.word_dictionary_dialog:
+            self.word_dictionary_dialog = WordDictionaryDialog(
+                self.db, 
+                self.search_engine, 
+                self
+            )
+            self.word_dictionary_dialog.word_selected.connect(self.handle_word_selected)
+        
+        # Show and raise the dialog
+        self.word_dictionary_dialog.show()
+        self.word_dictionary_dialog.raise_()
+        self.word_dictionary_dialog.activateWindow()
+    
+    def handle_word_selected(self, word, definition):
+        """Handle when a word is selected in dictionary"""
+        # You can implement functionality here, like:
+        # - Auto-filling search with the word
+        # - Showing the word in context
+        # - Copying to notes, etc.
+        
+        # For example, set search input to the word
+        if self.search_input:
+            self.search_input.setText(word)
+            # Optionally trigger search
+            # self.search()
 
     def increase_font_size(self):
         new_size = self.delegate.base_font_size + 1
-        if new_size <= 38:
+        if new_size <= 48:
             self.delegate.update_font_size(new_size)
             self.results_view.reset()
             self.showMessage(f"Font size: {self.delegate.base_font_size}",2000)
@@ -577,7 +609,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
 
 
     def copy_all_results(self):
-        """Copy all search results to clipboard with verse references (without span tags)"""
+        """Copy all search results to clipboard with verse references, grouping consecutive verses"""
         if not self.model.results:
             self.showMessage("No results to copy", 3000, bg="red")
             return
@@ -585,20 +617,106 @@ class QuranBrowser(QtWidgets.QMainWindow):
         version = self.get_current_version()
         text_list = []
         
-        for result in self.model.results:
-            # Remove span tags using regular expression
-            raw_text = result.get(f'text_{version}', '')
-            clean_text = re.sub(r'<span[^>]*>|</span>', '', raw_text)
-            
-            surah_num = result.get('surah', '')
-            ayah = result.get('ayah', '')
-            chapter = self.search_engine.get_chapter_name(surah_num)
-            text_list.append(f"{clean_text} ({chapter} {ayah})")
+        # Filter out pinned verses from the actual results for grouping
+        actual_results = [result for result in self.model.results if not result.get('is_pinned', False)]
         
+        if not actual_results:
+            self.showMessage("No search results to copy", 3000, bg="red")
+            return
+        
+        # Sort results by surah and ayah
+        verses = []
+        for result in actual_results:
+            try:
+                surah = int(result.get('surah', 0))
+                ayah = int(result.get('ayah', 0))
+                # Remove span tags
+                raw_text = result.get(f'text_{version}', '')
+                clean_text = re.sub(r'<span[^>]*>|</span>', '', raw_text)
+                
+                verses.append({
+                    'surah': surah,
+                    'ayah': ayah,
+                    'text': clean_text,
+                    'chapter': self.search_engine.get_chapter_name(surah)
+                })
+            except (ValueError, TypeError):
+                continue
+        
+        # Sort by surah then ayah
+        verses.sort(key=lambda x: (x['surah'], x['ayah']))
+        
+        # Group consecutive verses from same surah
+        grouped_verses = []
+        current_group = []
+        
+        for verse in verses:
+            if not current_group:
+                current_group.append(verse)
+            else:
+                last_verse = current_group[-1]
+                # Check if same surah and consecutive ayah
+                if (verse['surah'] == last_verse['surah'] and 
+                    verse['ayah'] == last_verse['ayah'] + 1):
+                    current_group.append(verse)
+                else:
+                    grouped_verses.append(current_group)
+                    current_group = [verse]
+        
+        if current_group:
+            grouped_verses.append(current_group)
+        
+        # Format the output
+        for group in grouped_verses:
+            if len(group) == 1:
+                # Single verse
+                verse = group[0]
+                text_list.append(f"﴿{verse['text']}﴾ ({verse['chapter']} {verse['ayah']})")
+            else:
+                # Group of consecutive verses
+                texts = [f"{v['text']} ({v['ayah']})• " for v in group]
+                combined_text = " ".join(texts)
+                
+                first_ayah = group[0]['ayah']
+                last_ayah = group[-1]['ayah']
+                chapter = group[0]['chapter']
+                
+                if first_ayah == last_ayah:
+                    ref = f"{chapter} {first_ayah}"
+                else:
+                    ref = f"{chapter} الآيات {first_ayah}-{last_ayah}"
+                
+                text_list.append(f"﴿{combined_text}﴾ ({ref})")
+
         full_text = "\n".join(text_list)
         clipboard = QtWidgets.QApplication.clipboard()
         clipboard.setText(full_text)
         self.showMessage("Copied all results to clipboard", 3000)
+
+
+    # def copy_all_results(self):
+    #     """Copy all search results to clipboard with verse references (without span tags)"""
+    #     if not self.model.results:
+    #         self.showMessage("No results to copy", 3000, bg="red")
+    #         return
+            
+    #     version = self.get_current_version()
+    #     text_list = []
+        
+    #     for result in self.model.results:
+    #         # Remove span tags using regular expression
+    #         raw_text = result.get(f'text_{version}', '')
+    #         clean_text = re.sub(r'<span[^>]*>|</span>', '', raw_text)
+            
+    #         surah_num = result.get('surah', '')
+    #         ayah = result.get('ayah', '')
+    #         chapter = self.search_engine.get_chapter_name(surah_num)
+    #         text_list.append(f"{clean_text} ({chapter} {ayah})")
+        
+    #     full_text = "\n".join(text_list)
+    #     clipboard = QtWidgets.QApplication.clipboard()
+    #     clipboard.setText(full_text)
+    #     self.showMessage("Copied all results to clipboard", 3000)
 
     def focus_note_editor(self):
         # If not in detail view, show it first
@@ -822,6 +940,11 @@ class QuranBrowser(QtWidgets.QMainWindow):
         pinned_action.triggered.connect(self.show_pinned_dialog)
         menu.addAction(pinned_action)
 
+        # Add Word Dictionary menu item
+        dict_action = QtWidgets.QAction("قاموس الكلمات", self)
+        dict_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+D"))
+        dict_action.triggered.connect(self.show_word_dictionary)
+        menu.addAction(dict_action)
 
         # Data Transfer (Ctrl+Shift+E)
         data_transfer_action = QtWidgets.QAction("Data Transfer", self)
@@ -1065,10 +1188,13 @@ class QuranBrowser(QtWidgets.QMainWindow):
             results = self.search_engine.search_by_surah(surah, is_dark_theme, self.highlight_words)
             for result in results:
                 if self.db.has_note(result['surah'], result['ayah']):
-                    #bullet = "◉ "  # smaller bullet than "●" "• "
                     bullet = "<span style='font-size:32px;'>•</span> "
                     result['text_simplified'] = bullet + result['text_simplified']
                     result['text_uthmani'] = bullet + result['text_uthmani']
+            
+            # Clear current view to ensure proper scroll behavior
+            self.current_view = {'type': 'surah', 'surah': surah}
+            
             self.update_results(results, f"Surah {surah} (Automatic Selection)")
             self.pending_scroll = (surah, selected_ayah)
             self.scroll_retries = 0
@@ -1464,7 +1590,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
         """Enhanced scroll function with progressive loading"""
         self.results_view.selectionModel().clearSelection()
         
-        # First try non-pinned items (actual results)
+        # First try non-pinned items (actual results) when in surah view
         for row in range(self.model.rowCount()):
             index = self.model.index(row, 0)
             result = self.model.data(index, QtCore.Qt.UserRole)
@@ -1480,7 +1606,7 @@ class QuranBrowser(QtWidgets.QMainWindow):
                     QtWidgets.QAbstractItemView.PositionAtCenter)
                 return True
                 
-        # If not found, check pinned verses only if not in surah view
+        # If not found and not in surah view, check pinned verses
         if not (self.current_view and self.current_view['type'] == 'surah'):
             for row in range(self.model.rowCount()):
                 index = self.model.index(row, 0)

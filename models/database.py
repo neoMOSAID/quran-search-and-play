@@ -45,6 +45,19 @@ class DbManager:
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_bookmarks ON bookmarks (timestamp)")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS word_dictionary (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    word TEXT NOT NULL UNIQUE,
+                    definition TEXT NOT NULL,
+                    created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_word ON word_dictionary (word)")
+
             # Add pinned_groups table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS pinned_groups (
@@ -623,3 +636,205 @@ class DbManager:
                 'timestamp': row[2],
                 'position': row[3]
             } for row in cursor.fetchall()]
+
+
+    # Word dictionary methods
+    def add_word(self, word, definition):
+        """Add a new word with definition"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            try:
+                cursor = conn.execute("""
+                    INSERT INTO word_dictionary (word, definition)
+                    VALUES (?, ?)
+                """, (word.strip(), definition.strip()))
+                return cursor.lastrowid
+            except sqlite3.IntegrityError:
+                return None
+    
+    def update_word(self, word_id, definition):
+        """Update word definition"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("""
+                UPDATE word_dictionary 
+                SET definition = ?, modified = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (definition.strip(), word_id))
+    
+    def delete_word(self, word_id):
+        """Delete a word from dictionary"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("DELETE FROM word_dictionary WHERE id = ?", (word_id,))
+    
+    def get_word(self, word_id):
+        """Get a specific word by ID"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT id, word, definition, created, modified
+                FROM word_dictionary
+                WHERE id = ?
+            """, (word_id,))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'word': row[1],
+                    'definition': row[2],
+                    'created': row[3],
+                    'modified': row[4]
+                }
+            return None
+    
+    def get_word_by_name(self, word):
+        """Get a word by its exact name"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT id, word, definition, created, modified
+                FROM word_dictionary
+                WHERE word = ?
+            """, (word.strip(),))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'word': row[1],
+                    'definition': row[2],
+                    'created': row[3],
+                    'modified': row[4]
+                }
+            return None
+    
+    def get_all_words(self, page=1, page_size=50, search_term=""):
+        """Get all words with pagination and search"""
+        offset = (page - 1) * page_size
+        with sqlite3.connect(str(self.db_path)) as conn:
+            if search_term:
+                cursor = conn.execute("""
+                    SELECT id, word, definition, created, modified
+                    FROM word_dictionary
+                    WHERE word LIKE ? OR definition LIKE ?
+                    ORDER BY word COLLATE NOCASE ASC
+                    LIMIT ? OFFSET ?
+                """, (f"%{search_term}%", f"%{search_term}%", page_size, offset))
+            else:
+                cursor = conn.execute("""
+                    SELECT id, word, definition, created, modified
+                    FROM word_dictionary
+                    ORDER BY word COLLATE NOCASE ASC
+                    LIMIT ? OFFSET ?
+                """, (page_size, offset))
+            
+            words = []
+            for row in cursor.fetchall():
+                words.append({
+                    'id': row[0],
+                    'word': row[1],
+                    'definition': row[2],
+                    'created': row[3],
+                    'modified': row[4]
+                })
+            return words
+    
+    def get_total_word_count(self, search_term=""):
+        """Get total count of words for pagination"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            if search_term:
+                cursor = conn.execute("""
+                    SELECT COUNT(*) 
+                    FROM word_dictionary
+                    WHERE word LIKE ? OR definition LIKE ?
+                """, (f"%{search_term}%", f"%{search_term}%"))
+            else:
+                cursor = conn.execute("SELECT COUNT(*) FROM word_dictionary")
+            return cursor.fetchone()[0]
+    
+    def get_words_starting_with(self, letter, page=1, page_size=50):
+        """Get words starting with a specific letter"""
+        offset = (page - 1) * page_size
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT id, word, definition, created, modified
+                FROM word_dictionary
+                WHERE word LIKE ?
+                ORDER BY word COLLATE NOCASE ASC
+                LIMIT ? OFFSET ?
+            """, (f"{letter}%", page_size, offset))
+            
+            words = []
+            for row in cursor.fetchall():
+                words.append({
+                    'id': row[0],
+                    'word': row[1],
+                    'definition': row[2],
+                    'created': row[3],
+                    'modified': row[4]
+                })
+            return words
+    
+    def get_total_words_starting_with(self, letter):
+        """Get count of words starting with specific letter"""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute("""
+                SELECT COUNT(*) 
+                FROM word_dictionary
+                WHERE word LIKE ?
+            """, (f"{letter}%",))
+            return cursor.fetchone()[0]
+    
+    def import_words_from_csv(self, file_path):
+        """Import words from CSV file"""
+        imported = 0
+        errors = 0
+        try:
+            import csv
+            with open(file_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # Skip header
+                
+                for row in reader:
+                    if len(row) < 2:
+                        errors += 1
+                        continue
+                    
+                    word = row[0].strip()
+                    definition = row[1].strip()
+                    
+                    if not word or not definition:
+                        errors += 1
+                        continue
+                    
+                    # Check if word already exists
+                    existing = self.get_word_by_name(word)
+                    if existing:
+                        # Update existing
+                        self.update_word(existing['id'], definition)
+                    else:
+                        # Add new
+                        self.add_word(word, definition)
+                    
+                    imported += 1
+                    
+            return imported, errors
+        except Exception as e:
+            logging.error(f"Import error: {e}")
+            raise
+    
+    def export_words_to_csv(self, file_path):
+        """Export words to CSV file"""
+        try:
+            import csv
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.execute("""
+                    SELECT word, definition
+                    FROM word_dictionary
+                    ORDER BY word COLLATE NOCASE ASC
+                """)
+                
+                with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(['Word', 'Definition'])
+                    writer.writerows(cursor.fetchall())
+                
+                return True
+        except Exception as e:
+            logging.error(f"Export error: {e}")
+            raise

@@ -492,7 +492,7 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.play_checkbox = QtWidgets.QCheckBox("Auto-Play")
         self.play_checkbox.setChecked(False)
         self.preview_check = QtWidgets.QCheckBox("Preview")
-        self.preview_check.setChecked(False)
+        self.preview_check.setChecked(True)
 
         # Note editing buttons
         self.edit_note_btn = QtWidgets.QPushButton("Edit Note")
@@ -513,11 +513,13 @@ class CourseManagerDialog(QtWidgets.QDialog):
         btn_layout.addWidget(self.save_note_btn)
         btn_layout.addWidget(self.cancel_note_btn)
 
+
+
         # Initially hide save/cancel buttons
         self.save_note_btn.hide()
         self.cancel_note_btn.hide()
 
-        button_container.setMaximumHeight(60) 
+        button_container.setMaximumHeight(32) 
         button_container.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding,
             QtWidgets.QSizePolicy.Fixed
@@ -525,26 +527,20 @@ class CourseManagerDialog(QtWidgets.QDialog):
 
         layout.addWidget(button_container)
 
-        # Dialog Buttons
-        self.dialog_btn = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Close)
+        dialog_button_container = QtWidgets.QWidget()
+        dialog_btn_layout = FlowLayout(dialog_button_container, margin=2, spacing=4)  
 
-        # Compact styling
-        self.dialog_btn.setStyleSheet("""
-            QPushButton {
-                min-width: 70px;
-                max-width: 90px;
-                padding: 2px 5px;
-                margin: 1px;
-            }
-            QDialogButtonBox {
-                spacing: 4px;
-            }
-        """)
+        self.save_btn = QtWidgets.QPushButton("Save")
+        self.save_btn.clicked.connect(self.save_course)
 
+        self.close_btn = QtWidgets.QPushButton("Close")
+        self.close_btn.clicked.connect(self.reject)
 
         self.print_btn = QtWidgets.QPushButton("Print")
         self.print_btn.clicked.connect(self.print_course)
+
+        self.delete_btn = QtWidgets.QPushButton("Delete")
+        self.delete_btn.clicked.connect(self.delete_current_course)
 
         self.refresh_btn = QtWidgets.QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh_course)
@@ -552,24 +548,23 @@ class CourseManagerDialog(QtWidgets.QDialog):
         self.open_btn = QtWidgets.QPushButton("Open")
         self.open_btn.clicked.connect(self.open_course_selection)
 
-        self.dialog_btn.addButton(self.open_btn, QtWidgets.QDialogButtonBox.ActionRole)
-        self.dialog_btn.addButton(self.print_btn, QtWidgets.QDialogButtonBox.ActionRole)
-        self.dialog_btn.addButton(self.refresh_btn, QtWidgets.QDialogButtonBox.ActionRole)
+        dialog_btn_layout.addWidget(self.save_btn)
+        dialog_btn_layout.addWidget(self.open_btn)
+        dialog_btn_layout.addWidget(self.print_btn)
+        dialog_btn_layout.addWidget(self.delete_btn)
+        dialog_btn_layout.addWidget(self.refresh_btn)
+        dialog_btn_layout.addWidget(self.close_btn)
 
-        # Button styling (unchanged)
-        self.dialog_btn.accepted.connect(self.save_course)
-        self.dialog_btn.rejected.connect(self.reject)
+        dialog_button_container.setMaximumHeight(32) 
+        dialog_button_container.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Fixed
+        )
 
-        # Create compact container
-        btn_container = QtWidgets.QWidget()
-        btn_container.setFixedHeight(32)  # Set fixed height
-        btn_container_layout = QtWidgets.QHBoxLayout(btn_container)
-        btn_container_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
-        btn_container_layout.setSpacing(4)
-        btn_container_layout.addWidget(self.dialog_btn)
-        btn_container_layout.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(dialog_button_container)
 
-        layout.addWidget(btn_container) 
+        self.button_container = button_container
+        self.dialog_button_container = dialog_button_container
 
         self.status_bar = QtWidgets.QStatusBar()
         self.status_bar.setSizeGripEnabled(False)
@@ -590,6 +585,18 @@ class CourseManagerDialog(QtWidgets.QDialog):
 
         self.setLayout(layout)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        
+        # Adjust button container heights based on width
+        if self.width() < 557:
+            # Double the height when width is below threshold
+            self.button_container.setFixedHeight(64)
+            self.dialog_button_container.setFixedHeight(64)
+        else:
+            # Restore normal height when width is sufficient
+            self.button_container.setFixedHeight(32)
+            self.dialog_button_container.setFixedHeight(32)
 
     def showEvent(self, event):
         """Ensure dropdown appears correctly"""
@@ -873,6 +880,40 @@ class CourseManagerDialog(QtWidgets.QDialog):
             self.model.insertRow(row + direction, item)
             self.list_view.setCurrentIndex(self.model.index(row + direction, 0))
         self.mark_unsaved()
+
+
+    def delete_current_course(self):
+        """Delete the current course after confirmation"""
+        if not self.current_course:
+            return
+            
+        # Confirm deletion
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            'Delete Course',
+            f'Are you sure you want to delete "{self.current_course["title"]}"?',
+            QtWidgets.QMessageBox.Yes | QtWidgets.QDialogButtonBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.No:
+            return
+            
+        # Delete the course
+        course_id = self.current_course['id']
+        self.db.delete_course(course_id)
+        
+        # Load another course or create a new one
+        courses = self.db.get_all_courses()
+        if courses:
+            # Load the first available course
+            self.load_course(courses[0][0])
+        else:
+            # Create a new course if none exist
+            new_id = self.db.create_new_course()
+            self.load_course(new_id)
+            
+        self.course_modified.emit()
+        self.status_bar.showMessage("Course deleted", 3000)
 
     def save_course(self):
         items = []
@@ -1193,13 +1234,14 @@ class CourseManagerDialog(QtWidgets.QDialog):
         controls = [
             self.add_note_btn, self.remove_btn, self.move_up_btn, self.move_down_btn,
             self.play_checkbox, self.preview_check, self.course_combo, self.prev_btn, self.next_btn,
-            self.print_btn, self.open_btn, self.edit_note_btn, self.dialog_btn
+            self.print_btn, self.open_btn, self.edit_note_btn, 
+            self.save_btn, self.close_btn, self.print_btn, self.delete_btn, self.refresh_btn, self.open_btn 
         ]
         
         for control in controls:
             control.setEnabled(not editing)
             
-        # self.list_view.setEnabled(not editing)
+        #self.list_view.setEnabled(not editing)
         # self.splitter.setEnabled(not editing)
         
         # Show/hide editing buttons
@@ -1381,10 +1423,10 @@ class CourseManagerDialog(QtWidgets.QDialog):
         output = []
         title = self.course_combo.currentText()
         search_engine = self.parent().search_engine
-        output.extend(["",])
+        #output.extend(["",])
         #output.extend(["========================================================================",])
         output.extend([f"درس: {title}",])
-        output.extend(["========================================================================", ""])
+        #output.extend(["========================================================================", ""])
 
         for i in range(len(items)):
             item_data = items[i]
