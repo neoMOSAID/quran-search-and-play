@@ -11,11 +11,18 @@ def resource_path(relative_path):
     try:
         # When bundled, PyInstaller stores files in sys._MEIPASS
         base_path = sys._MEIPASS
+        # In frozen mode, resources are at root level
+        if relative_path.startswith("../"):
+            relative_path = relative_path[3:]
     except Exception:
         # When running in development, use the directory of this script
         base_path = os.path.dirname(os.path.abspath(__file__))
+        # Go up one level to project root for relative paths
+        if relative_path.startswith("../"):
+            base_path = os.path.dirname(base_path)
+            relative_path = relative_path[3:]
+    
     return os.path.join(base_path, relative_path)
-
 
 
 class QuranSearch:
@@ -38,29 +45,33 @@ class QuranSearch:
     def _load_chapters(self):
         """Load chapter names from the quran_text package"""
         try:
-            text = importlib.resources.read_text("resources", "quran_text/chapters.txt", encoding="utf-8")
-            self._chapters = [line.strip() for line in text.splitlines()]
+            # Use resource_path for PyInstaller compatibility
+            file_path = resource_path("../resources/quran_text/chapters.txt")
+            with open(file_path, 'r', encoding='utf-8') as f:
+                self._chapters = [line.strip() for line in f.readlines()]
         except Exception as e:
             raise RuntimeError(f"Could not load chapters: {e}")
 
     def _load_verses(self, filename, target_dict):
         """Generic verse loader for different versions from the quran_text package"""
         try:
-            text = importlib.resources.read_text("resources", filename, encoding="utf-8")
-            for line in text.splitlines():
-                parts = line.strip().split('|')
-                if len(parts) < 3:
-                    continue
-                try:
-                    surah = int(parts[0])
-                    ayah = int(parts[1])
-                    text_line = '|'.join(parts[2:])
-                    target_dict[(surah, ayah)] = {
-                        'text': text_line,
-                        'full': line.strip()
-                    }
-                except (ValueError, IndexError):
-                    continue
+            # Use resource_path for PyInstaller compatibility
+            file_path = resource_path(f"../resources/{filename}")
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    parts = line.strip().split('|')
+                    if len(parts) < 3:
+                        continue
+                    try:
+                        surah = int(parts[0])
+                        ayah = int(parts[1])
+                        text_line = '|'.join(parts[2:])
+                        target_dict[(surah, ayah)] = {
+                            'text': text_line,
+                            'full': line.strip()
+                        }
+                    except (ValueError, IndexError):
+                        continue
         except Exception as e:
             raise RuntimeError(f"Could not load {filename}: {e}")
 
@@ -125,6 +136,13 @@ class QuranSearch:
 
     def _parse_search_query(self, query):
         """Parse search query for special operators and patterns"""
+        # Check for surah tokens
+        in_current_surah = '!' in query
+        in_combo_surah = '?' in query or '؟' in query
+        
+        # Remove surah tokens from the query for parsing
+        query = query.replace('!', '').replace('?', '').replace('؟', '')
+        
         preserve_hamza = '@' in query
         query = query.replace('@', '')  # Remove @ symbol if present
 
@@ -157,10 +175,90 @@ class QuranSearch:
         return {
             'term': term,
             'pattern_type': pattern_type,
-            'preserve_hamza': preserve_hamza
+            'preserve_hamza': preserve_hamza,
+            'in_current_surah': in_current_surah,
+            'in_combo_surah': in_combo_surah
         }
 
-  
+    def search_in_surah(self, query, surah, is_dark_theme=False, highlight_words=[]):
+        """
+        Search within a specific surah only.
+        
+        Args:
+            query: Search query (will parse for operators)
+            surah: Surah number to search within
+            is_dark_theme: Theme for highlighting
+            highlight_words: Permanent highlight words
+            
+        Returns: (results, total_occurrences)
+        """
+        # Parse the search query
+        search_params = self._parse_search_query(query)
+        term = search_params['term']
+        pattern_type = search_params['pattern_type']
+        preserve_hamza = search_params['preserve_hamza']
+        
+        normalized_query = self._normalize_text(term, preserve_hamza)
+        results = []
+        total_occurrences = 0
+        
+        # Get all verses in the specified surah
+        for ayah in range(1, self.get_verse_count(surah) + 1):
+            data = self._simplified.get((surah, ayah))
+            if not data:
+                continue
+                
+            normalized_text = self._normalize_text(data['text'], preserve_hamza)
+            
+            # Apply the appropriate search pattern
+            match_found = False
+            occurrences = 0
+            
+            if pattern_type == 'substring':
+                if normalized_query in normalized_text:
+                    match_found = True
+                    occurrences = normalized_text.count(normalized_query)
+            elif pattern_type == 'starts_with':
+                # Split into words and check each word
+                words = normalized_text.split()
+                for word in words:
+                    if word.startswith(normalized_query):
+                        match_found = True
+                        occurrences += 1
+            elif pattern_type == 'ends_with':
+                # Split into words and check each word
+                words = normalized_text.split()
+                for word in words:
+                    if word.endswith(normalized_query):
+                        match_found = True
+                        occurrences += 1
+            elif pattern_type == 'exact_word':
+                # Split into words and check each word
+                words = normalized_text.split()
+                for word in words:
+                    if word == normalized_query:
+                        match_found = True
+                        occurrences += 1
+            
+            if match_found:
+                total_occurrences += occurrences
+
+                uthmani_text = self._uthmani.get((surah, ayah), {}).get('text', '')
+                
+                # Apply search highlighting
+                highlighted_simplified = self.highlight(data['text'], query, is_dark_theme)
+                highlighted_uthmani = self.highlight(uthmani_text, query, is_dark_theme)
+
+                results.append({
+                    'surah': surah,
+                    'ayah': ayah,
+                    'text_simplified': highlighted_simplified,
+                    'text_uthmani': highlighted_uthmani,
+                    'chapter': self.get_chapter_name(surah)
+                })
+        
+        return results, total_occurrences
+
     def search_verses(self, query, is_dark_theme=False, highlight_words=[]):
         # Parse the search query
         search_params = self._parse_search_query(query)

@@ -1,4 +1,64 @@
+
+# Add at the top of notes_manager.py after existing imports
+import re
+import csv
+import logging
+from datetime import datetime
 from PyQt5 import QtWidgets, QtCore, QtGui
+
+
+
+class DefinitionHighlighter(QtGui.QSyntaxHighlighter):
+    def __init__(self, document, is_dark_theme):
+        super().__init__(document)
+
+        # Invisible marker format
+        self.hidden_format = QtGui.QTextCharFormat()
+        self.hidden_format.setForeground(QtCore.Qt.transparent)
+
+        self.is_dark_theme = is_dark_theme
+
+        # Determine note color based on theme
+        if is_dark_theme:
+            note_fg = "#D66A2C"       # orange for dark background
+            note_bg = None
+        else:
+            note_fg = "#9C2A00"   # deep burnt-orange, low saturation, easy on the eyes
+            note_bg = "#FFF3E8"   # very light warm background, barely noticeable but guides the eye
+
+        # Marker → format mapping
+        self.rules = {
+            "**": self._make_format("#1565C0", bold=True),   # main header
+            "##": self._make_format("#2E7D32", bold=True),   # sub header
+            "--": self._make_format(fg=note_fg, bg=note_bg, bold=False),  # note
+            "!!": self._make_format("#C62828", bold=True),   # warning
+        }
+
+    def _make_format(self, fg, bg=None, bold=False):
+        fmt = QtGui.QTextCharFormat()
+        fmt.setForeground(QtGui.QColor(fg))
+        if bg:
+            fmt.setBackground(QtGui.QColor(bg))
+            fmt.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+        if bold:
+            fmt.setFontWeight(QtGui.QFont.Bold)
+        return fmt
+
+    def highlightBlock(self, text):
+        for marker, fmt in self.rules.items():
+            if text.startswith(marker):
+                marker_len = len(marker)
+
+                # Hide marker
+                self.setFormat(0, marker_len, self.hidden_format)
+
+                # Style rest of line
+                self.setFormat(
+                    marker_len,
+                    len(text) - marker_len,
+                    fmt
+                )
+                break
 
 class NotesManagerDialog(QtWidgets.QDialog):
     show_ayah_requested = QtCore.pyqtSignal(int, int)  # Surah, Ayah
@@ -6,13 +66,23 @@ class NotesManagerDialog(QtWidgets.QDialog):
     def __init__(self, db, search_engine, parent=None):
         super().__init__(parent)
         self.db = db
+        self.main_window = parent
         self.search_engine = search_engine
         self.current_note = None
         self.original_content = ""  # To track changes
+
+        self.is_dark_theme = False
+        if self.main_window and hasattr(self.main_window, 'theme_action'):
+            self.is_dark_theme = self.main_window.theme_action.isChecked()
+            self.main_window.theme_action.toggled.connect(self.handle_theme_change)
+        
         self.init_ui()
         self.setup_rtl()
+        self.apply_theme_styles()  # Apply initial theme
         self.setWindowTitle("إدارة التسجيلات")
         self.resize(1000, 600)
+
+    
 
     def init_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -46,7 +116,11 @@ class NotesManagerDialog(QtWidgets.QDialog):
         # QTextEdit for notes
         self.note_content = QtWidgets.QTextEdit()
         self.note_content.setReadOnly(True)
-        self.note_content.textChanged.connect(self.on_content_changed)
+        self.note_content.setLayoutDirection(QtCore.Qt.RightToLeft)
+        self.note_content.setAlignment(QtCore.Qt.AlignRight)
+
+        # Create and set the highlighter
+        self.highlighter = DefinitionHighlighter(self.note_content.document(), self.is_dark_theme)
 
         # Create a vertical splitter for verse + note
         self.content_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
@@ -69,8 +143,8 @@ class NotesManagerDialog(QtWidgets.QDialog):
         button_row.addWidget(self.edit_checkbox)
         button_row.addStretch()
         button_row.addWidget(self.save_btn)
-        button_row.addWidget(self.delete_btn)
         button_row.addWidget(self.show_btn)
+        button_row.addWidget(self.delete_btn)
         button_row.addWidget(self.close_btn)
 
         # Assemble content layout
@@ -98,7 +172,61 @@ class NotesManagerDialog(QtWidgets.QDialog):
         self.show_btn.clicked.connect(self.show_ayah)
         self.close_btn.clicked.connect(self.check_unsaved_changes_before_close)
         self.edit_checkbox.toggled.connect(self.toggle_editing)
+        self.note_content.textChanged.connect(self.on_content_changed)
 
+        self.close_btn.setFocus()
+
+
+    def apply_theme_styles(self):
+        """Apply theme-specific styling to note_content"""
+        # Determine base colors based on theme
+        if self.is_dark_theme:
+            base_bg = "#252525"
+            base_fg = "#FFFFFF"
+            border_color = "#555555"
+            read_only_bg = "#2A2A2A"
+            edit_bg = "#3A2A00"  # Dark orange-brown for edit mode
+        else:
+            base_bg = "white"
+            base_fg = "black"
+            border_color = "#CCCCCC"
+            read_only_bg = "#F9F9F9"
+            edit_bg = "#FFF8E1"  # Light orange for edit mode
+
+        # Apply to note_content - use property-based styling
+        self.note_content.setStyleSheet(f"""
+            QTextEdit {{
+                font-family: 'Amiri';
+                font-size: 14pt;
+                background-color: {base_bg};
+                color: {base_fg};
+                border: 1px solid {border_color};
+                border-radius: 5px;
+                padding: 10px;
+                text-align: right;
+            }}
+        """)
+        
+        # Also update the verse display
+        self.verse_display.setStyleSheet(f"""
+            QTextEdit {{
+                font-family: 'Amiri';
+                font-size: 16pt;
+                background-color: {base_bg};
+                color: {base_fg};
+                border: 1px solid {border_color};
+                border-radius: 5px;
+                padding: 10px;
+                text-align: right;
+            }}
+        """)
+
+    def handle_theme_change(self, dark):
+        """Handle theme changes from main window"""
+        self.is_dark_theme = dark
+        self.highlighter.is_dark_theme = dark
+        self.apply_theme_styles()
+        self.highlighter.rehighlight()
 
     def setup_rtl(self):
         self.setLayoutDirection(QtCore.Qt.RightToLeft)
@@ -167,6 +295,7 @@ class NotesManagerDialog(QtWidgets.QDialog):
             self.edit_checkbox.setChecked(False)
             self.note_content.setReadOnly(True)
             self.save_btn.setEnabled(False)
+            self.show_btn.setFocus()
         else:
             self.current_note = None
             self.verse_display.clear()
@@ -184,7 +313,7 @@ class NotesManagerDialog(QtWidgets.QDialog):
             return ""
 
     def on_content_changed(self):
-        if self.edit_checkbox.isChecked():
+        if self.edit_checkbox:
             self.save_btn.setEnabled(True)
 
     def toggle_editing(self, enabled):
@@ -205,6 +334,28 @@ class NotesManagerDialog(QtWidgets.QDialog):
             
             # Enable editing
             self.note_content.setReadOnly(False)
+            
+            # Apply edit mode styling
+            if self.is_dark_theme:
+                edit_bg = "#3A2A00"
+                border_color = "#FFA000"
+            else:
+                edit_bg = "#FFF8E1"
+                border_color = "#FFA000"
+                
+            self.note_content.setStyleSheet(f"""
+                QTextEdit {{
+                    font-family: 'Amiri';
+                    font-size: 14pt;
+                    background-color: {edit_bg};
+                    color: {'#FFFFFF' if self.is_dark_theme else 'black'};
+                    border: 2px solid {border_color};
+                    border-radius: 5px;
+                    padding: 10px;
+                    text-align: right;
+                }}
+            """)
+            
             self.note_content.setFocus()
             self.show_status_message("تم تمكين التعديل", 2000)
         else:
@@ -235,8 +386,13 @@ class NotesManagerDialog(QtWidgets.QDialog):
             self.show_btn.setEnabled(True)
             self.close_btn.setEnabled(True)
             self.note_content.setReadOnly(True)
+            
+            # Apply read-only styling
+            self.apply_theme_styles()
+            
             self.save_btn.setEnabled(False)
             self.show_status_message("تم تعطيل التعديل", 2000)
+
 
     def save_note(self):
         if self.current_note and self.edit_checkbox.isChecked():
@@ -249,7 +405,9 @@ class NotesManagerDialog(QtWidgets.QDialog):
                 self.show_status_message("تم حفظ التغييرات بنجاح", 2000)
                 
                 # Exit edit mode after saving
-                self.edit_checkbox.setChecked(False)
+                self.edit_checkbox.setChecked(False)    
+                # Re-highlight the content
+                self.highlighter.rehighlight()      
 
     def delete_note(self):
         if self.current_note and not self.edit_checkbox.isChecked():

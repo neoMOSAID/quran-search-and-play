@@ -1249,25 +1249,33 @@ class QuranBrowser(QtWidgets.QMainWindow):
             self.showMessage("Please enter a search query", 3000, bg="red")
             return
         
+        # Check for special surah search tokens
+        in_current_surah = '!' in query
+        in_combo_surah = '?' in query or '؟' in query
+        
+        # If we have surah tokens but not in Text method, show error
+        if (in_current_surah or in_combo_surah) and method != "Text":
+            self.showMessage("Surah search tokens (! and ?) only work with Text search method", 3000, bg="red")
+            return
+        
+        # Determine which surah to search in if tokens are present
+        surah_to_search = None
+        if in_current_surah:
+            # Get surah from current view
+            if self.current_view and self.current_view['type'] == 'surah':
+                surah_to_search = self.current_view['surah']
+            else:
+                self.showMessage("No surah currently loaded. Please load a surah first.", 3000, bg="red")
+                return
+        elif in_combo_surah:
+            # Get surah from combo box
+            surah_to_search = self.surah_combo.currentIndex() + 1
+        
         # Update history for both inputs
         self.search_input_h.update_history(query)
         self.search_input_v.update_history(query)
         
         self.showMessage("Searching...", 2000)
-
-        if (method == "Surah" and query.isdigit()) or method == "Surah FirstAyah LastAyah":
-            try:
-                if method == "Surah":
-                    surah_num = int(query)
-                else:
-                    parts = [int(p) for p in query.split()]
-                    surah_num = parts[0] if parts else None
-                if surah_num is not None:
-                    self.current_surah = surah_num
-                    self.surah_combo.setCurrentIndex(surah_num - 1)  # Adjust for 0-based index
-            except ValueError:
-                # Conversion failed; do nothing.
-                pass
 
         # Start the search in a background thread.
         is_dark = self.theme_action.isChecked()
@@ -1276,7 +1284,8 @@ class QuranBrowser(QtWidgets.QMainWindow):
             method=method,
             query=query,
             is_dark_theme=is_dark,  
-            parent=self
+            parent=self,
+            surah_to_search=surah_to_search  # Add this parameter
         )
         self.search_worker.results_ready.connect(self.handle_search_results)
         self.search_worker.error_occurred.connect(lambda error: self.showMessage(f"Search error: {error}", 3000, bg="red"))

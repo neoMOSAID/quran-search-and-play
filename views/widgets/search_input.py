@@ -1,5 +1,5 @@
 
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 from models.search_engine import QuranSearch, QuranWordCache
 
 
@@ -7,10 +7,38 @@ class SearchLineEdit(QtWidgets.QLineEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         QuranWordCache(QuranSearch())
-        self.history_max = 500  # 
+        self.history_max = 500
+        
+        # Add tooltip explaining special search tokens
+        self.setToolTip(
+            "<html><body>"
+            "<h4>Special Search Tokens:</h4>"
+            "<ul style='margin: 5px 0; padding-left: 15px; font-size: 16px;'>"
+            "<li><b>@</b> - Preserve hamza (don't normalize alif variations)<br>"
+            "<i>Example:</i> 'ألم' → searches for ألم exactly</li>"
+            "<li><b>#</b> - Exact word match (like %term%)<br>"
+            "<i>Example:</i> '#الرحمن' → finds الرحمن as complete word</li>"
+            "<li><b>%</b> - Wildcard pattern:<br>"
+            "• <b>term%</b> - Words starting with 'term'<br>"
+            "• <b>%term</b> - Words ending with 'term'<br>"
+            "• <b>%term%</b> - Words containing 'term' (exact word)</li>"
+            "<li><b>!</b> - Search in currently loaded surah<br>"
+            "<i>Example:</i> '!الله' → searches for الله in current surah only</li>"
+            "<li><b>?</b> - Search in surah from dropdown<br>"
+            "<i>Example:</i> '?الله' → searches for الله in selected surah only</li>"
+            "</ul>"
+            "<p style='margin-top: 10px; font-size: 16px;'><i>Combination examples:</i><br>"
+            "'@الرح%' - Preserves hamza + finds words starting with 'الرح'<br>"
+            "'!@الله' - Searches for الله in current surah, preserving hamza</p>"
+            "</body></html>"
+        )
+                
+        # Set tooltip duration to show for longer
+        QtWidgets.QToolTip.setFont(QtGui.QFont("Amiri", 15))
+        
         self.init_completer()
         self.init_history()
-
+        
         # Setup text editing signals
         self.textEdited.connect(self.update_completion_prefix)
 

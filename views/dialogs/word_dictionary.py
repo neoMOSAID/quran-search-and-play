@@ -90,18 +90,31 @@ class WordItemDelegate(QtWidgets.QStyledItemDelegate):
                     painter.fillRect(option.rect, QtGui.QColor('#252525'))
                 else:
                     painter.fillRect(option.rect, QtGui.QColor('#F8F8F8'))
+            else:
+                # For odd rows, use appropriate background
+                if is_dark:
+                    painter.fillRect(option.rect, QtGui.QColor('#1E1E1E'))  # Slightly different dark color
+                else:
+                    painter.fillRect(option.rect, QtGui.QColor('#FFFFFF'))  # Explicit white
         
-        # Text color
+        # Text color - FIXED: Use explicit colors instead of palette
         if option.state & QtWidgets.QStyle.State_Selected:
-            text_color = option.palette.highlightedText().color()
+            if is_dark:
+                text_color = QtGui.QColor('#FFFFFF')  # White text for selected dark items
+            else:
+                text_color = option.palette.highlightedText().color()
         else:
-            text_color = option.palette.text().color()
+            # Use explicit colors based on theme
+            if is_dark:
+                text_color = QtGui.QColor('#E0E0E0')  # Light gray text for dark background
+            else:
+                text_color = QtGui.QColor('#000000')  # Black text for light background
         
         painter.setPen(text_color)
         
         # Draw word with proper Arabic alignment
         text_rect = QtCore.QRect(option.rect.left() + 10, option.rect.top(), 
-                               option.rect.width() - 20, option.rect.height())
+                            option.rect.width() - 20, option.rect.height())
         
         font = painter.font()
         font.setPointSize(12)
@@ -113,7 +126,7 @@ class WordItemDelegate(QtWidgets.QStyledItemDelegate):
         painter.drawText(text_rect, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, word_data['word'])
         
         painter.restore()
-    
+        
     def sizeHint(self, option, index):
         sh = super().sizeHint(option, index)
         sh.setHeight(40)  # Slightly larger for better readability
@@ -440,7 +453,7 @@ class WordDictionaryDialog(QtWidgets.QDialog):
         # Add widgets to splitter 
         splitter.addWidget(left_widget)  
         splitter.addWidget(right_widget)  
-        splitter.setSizes([250, 700])  # 74%/26% split
+        splitter.setSizes([290, 700])  # 74%/26% split
         
         main_layout.addWidget(splitter)
         
@@ -597,6 +610,9 @@ class WordDictionaryDialog(QtWidgets.QDialog):
                     background-color: #F9F9F9;
                 }
             """)
+        self.word_list.viewport().update()
+        self.highlighter.is_dark_theme = self.is_dark_theme
+        self.highlighter.rehighlight()
     
     def set_edit_mode(self, editing):
         """Enable/disable UI elements during editing to prevent data loss"""
@@ -939,21 +955,21 @@ class WordDictionaryDialog(QtWidgets.QDialog):
             )
             return
         
-        # Get definition
-        definition, ok = QtWidgets.QInputDialog.getMultiLineText(
-            self,
-            "تعريف الكلمة",
-            f"أدخل تعريف الكلمة '{word}':",
-            ""
-        )
+        # # Get definition
+        # definition, ok = QtWidgets.QInputDialog.getMultiLineText(
+        #     self,
+        #     "تعريف الكلمة",
+        #     f"أدخل تعريف الكلمة '{word}':",
+        #     ""
+        # )
         
-        if not ok or not definition.strip():
-            return
+        # if not ok or not definition.strip():
+        #     return
         
-        definition = definition.strip()
+        #definition = definition.strip()
         
         # Add to database
-        word_id = self.db.add_word(word, definition)
+        word_id = self.db.add_word(word, " ")
         if not word_id:
             QtWidgets.QMessageBox.warning(
                 self,
